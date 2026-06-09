@@ -269,9 +269,8 @@ internal sealed class PriceOverlayForm : Form
 
     private int TextWidth(Graphics g, string s) => (int)Math.Ceiling(g.MeasureString(s, _priceFont).Width);
 
-    // A near-black rounded plate behind the icon + price so they read clearly over busy art. The
-    // overlay is color-keyed on pure black (Color.Black = transparent), so the plate uses a non-black
-    // near-black RGB — it renders opaque, which also gives the text a clean edge to anti-alias against.
+    // A rounded, semi-transparent slate plate behind the icon + price so they read clearly over busy
+    // art — the game shows faintly through it (see RenderLayered for the per-pixel-alpha window).
     private void DrawBackdrop(Graphics g, int x, int centerY, int contentWidth)
     {
         const int padX = 6, padY = 3, radius = 6;
@@ -280,8 +279,7 @@ internal sealed class PriceOverlayForm : Form
         var prev = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = RoundedRect(rect, radius);
-        // Lighter, semi-transparent slate plate — the game art shows faintly through it. Premultiplied
-        // because the layered window expects premultiplied alpha (see RenderLayered); opaque text/icons
+        // Premultiplied because the layered window expects premultiplied alpha; opaque text/icons
         // drawn on top are unaffected (premultiplied == straight at full alpha).
         using var bg = new SolidBrush(Premultiply(Color.FromArgb(150, 55, 55, 64)));
         g.FillPath(bg, path);
