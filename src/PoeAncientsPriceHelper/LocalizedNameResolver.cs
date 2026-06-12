@@ -14,8 +14,6 @@ internal static class LocalizedNameResolver
             return fenumusKey;
         if (TryResolveRussianAncientRuneKey(normalizedName, out var ancientRuneKey))
             return ancientRuneKey;
-        if (TryResolveRussianRuneOfKey(normalizedName, out var runeOfKey))
-            return runeOfKey;
 
         if (RussianAliases.TryGetValue(normalizedName, out var key))
             return key;
@@ -33,6 +31,9 @@ internal static class LocalizedNameResolver
         if (normalizedName.Length >= 8 &&
             BestRussianAlias(normalizedName) is { } fuzzyKey)
             return fuzzyKey;
+
+        if (TryResolveRussianRuneOfKey(normalizedName, out var runeOfKey))
+            return runeOfKey;
 
         return normalizedName;
     }
@@ -182,6 +183,14 @@ internal static class LocalizedNameResolver
         void Add(string russian, string english)
             => aliases[OcrScanner.NormalizeName(russian)] = PriceRepository.NormalizeName(english);
 
+        void AddRuneFamily(string russianSuffix, string englishPrefix)
+        {
+            Add($"Руна {russianSuffix}", $"{englishPrefix} Rune");
+            Add($"Малая руна {russianSuffix}", $"Lesser {englishPrefix} Rune");
+            Add($"Большая руна {russianSuffix}", $"Greater {englishPrefix} Rune");
+            Add($"Безупречная руна {russianSuffix}", $"Perfect {englishPrefix} Rune");
+        }
+
         Add("Точильный камень", "Blacksmith's Whetstone");
         Add("Резец чародея", "Arcanist's Etcher");
         Add("Свиток мудрости", "Scroll of Wisdom");
@@ -189,6 +198,7 @@ internal static class LocalizedNameResolver
         Add("Большая сфера хаоса", "Greater Chaos Orb");
         Add("Совершенная сфера хаоса", "Perfect Chaos Orb");
         Add("Деталь доспеха", "Armourer's Scrap");
+        Add("Божественная сфера", "Divine Orb");
         Add("Зеркало Каландры", "Mirror of Kalandra");
         Add("Прядь Хинекоры", "Hinekora's Lock");
         Add("Сфера алхимии", "Orb of Alchemy");
@@ -227,15 +237,103 @@ internal static class LocalizedNameResolver
         Add("Сфера извлечения", "Orb of Extraction");
         Add("Культивирующая сфера ваал", "Vaal Cultivation Orb");
         Add("Уникальная бижутерия", "Unique Jewellery");
+        Add("Сфера архитектора", "Architect's Orb");
+        Add("Нагнетатель чародея ваал", "Vaal Arcanist's Infuser");
+        Add("Нагнетатель бронника ваал", "Vaal Armourer's Infuser");
+        Add("Нагнетатель кузнеца ваал", "Vaal Blacksmith's Infuser");
+        Add("Катализирующий нагнетатель ваал", "Vaal Catalysing Infuser");
+        Add("Поглотитель ваал", "Vaal Siphoner");
+        Add("Веризий", "Verisium");
+        Add("Исключительный веризий", "Exceptional Verisium");
+        Add("Рунный сплав", "Runic Alloy");
+        Add("Экспансивный сплав", "Expansive Alloy");
+        Add("Лёгкий сплав", "Swift Alloy");
+        Add("Мистический сплав", "Mystic Alloy");
+        Add("Небесный сплав", "Celestial Alloy");
+        Add("Вихревой сплав", "Cyclonic Alloy");
+        Add("Радужный сплав", "Prismatic Alloy");
+        Add("Защитный сплав", "Protective Alloy");
+        Add("Державный сплав", "Sovereign Alloy");
+        Add("Сплав Повелителя рун", "The Runebinder's Alloy");
+        Add("Сплав Рунного отца", "The Runefather's Alloy");
+        Add("Возвышенный сплав", "Transcendent Alloy");
+        Add("Благоговейная подзвёздная руда", "Revered Starlit Ore");
+        Add("Почитаемая подзвёздная руда", "Venerable Starlit Ore");
+        Add("Истинная подзвёздная руда", "Veridical Starlit Ore");
+        Add("Оберегающая подзвёздная руда", "Warding Starlit Ore");
+        Add("Знак Круга Медведя", "Medved's Crest of the Circle");
+        Add("Знак Солнца Олрота", "Olroth's Crest of the Sun");
+        Add("Знак Чаши Утреда", "Uhtred's Crest of the Chalice");
+        Add("Знак Косы Вораны", "Vorana's Crest of the Scythe");
+        Add("Сага Альдура", "Aldur's Saga");
+        Add("Сага Медведя", "Medved's Saga");
+        Add("Сага Олрота", "Olroth's Saga");
+        Add("Сага Утреда", "Uhtred's Saga");
+        Add("Сага Вораны", "Vorana's Saga");
+        Add("Журнал экспедиции", "Expedition Logbook");
+        Add("Жгучий расплав", "Blazing Flux");
+        Add("Студёный расплав", "Chilling Flux");
+        Add("Искрящий расплав", "Crackling Flux");
+        Add("Пустотный расплав", "Void Flux");
+        Add("Сфера Узазы", "Perfect Flux");
+        Add("Наследие Альдура", "Aldur's Legacy");
+        Add("Изобретательность Астрид", "Astrid's Creativity");
+        Add("Предательство Альдура", "Betrayal of Aldur");
+        Add("Дыхание Альдура", "Breath of Aldur");
+        Add("Озарение Кадигана", "Cadigan's Epiphany");
+        Add("Гнев Альдура", "Ire of Aldur");
+        Add("Мрачность Катлы", "Katla's Gloom");
+        Add("Охота Колра", "Kolr's Hunt");
+        Add("Присмотр Медведя", "Medved's Tending");
+        Add("Страсть Альдура", "Passion of Aldur");
+        Add("Триумф Серли", "Serle's Triumph");
+        Add("Сила Трада", "Thrud's Might");
+        Add("Сидерий Утреда", "Uhtred's Sidereus");
+        Add("Резня Вораны", "Vorana's Carnage");
         Add("Руна мудрости лесной ведьмы Ассандры", "Hedgewitch Assandra's Rune of Wisdom");
         Add("Руна дикости тана Гирта", "Thane Girt's Rune of Wildness");
         Add("Руна мастерства тана Граннеля", "Thane Grannell's Rune of Mastery");
         Add("Руна весны тана Лельда", "Thane Leld's Rune of Spring");
         Add("Руна лета тана Мирка", "Thane Myrk's Rune of Summer");
+        Add("Руна меткости графини Сеске", "Countess Seske's Rune of Archery");
+        Add("Руна жестокости куртизанки Маннан", "Courtesan Mannan's Rune of Cruelty");
+        Add("Руна восстановления Краценна", "Craiceann's Rune of Recovery");
+        Add("Руна барьера Краценна", "Craiceann's Rune of Warding");
+        Add("Руна грации Фаррул", "Farrul's Rune of Grace");
+        Add("Руна погони Фаррул", "Farrul's Rune of the Chase");
+        Add("Руна охоты Фаррул", "Farrul's Rune of the Hunt");
+        Add("Руна зимы леди Гестры", "Lady Hestra's Rune of Winter");
+        Add("Руна эрозии Сакаваля", "Saqawal's Rune of Erosion");
+        Add("Руна памяти Сакаваля", "Saqawal's Rune of Memory");
+        Add("Руна неба Сакаваля", "Saqawal's Rune of the Sky");
+        Add("Руна когтей Великого волка", "The Greatwolf's Rune of Claws");
+        Add("Руна воли Великого волка", "The Greatwolf's Rune of Willpower");
         Add("Руна накопления", "Rune of Accumulation");
         Add("Руна акробатики", "Rune of Acrobatics");
         Add("Руна охоты", "Rune of the Hunt");
         Add("Адаптивный сплав", "Adaptive Alloy");
+        Add("Мастерская руна", "Masterwork Rune");
+        Add("Руна заряда", "Charging Rune");
+        Add("Большая руна заряда", "Greater Charging Rune");
+        Add("Безупречная руна заряда", "Perfect Charging Rune");
+        Add("Большая руна стремления", "Greater Rune of Alacrity");
+        Add("Большая руна лидерства", "Greater Rune of Leadership");
+        Add("Большая руна дворянства", "Greater Rune of Nobility");
+        Add("Большая руна десятины", "Greater Rune of Tithing");
+        AddRuneFamily("искусности", "Adept");
+        AddRuneFamily("тела", "Body");
+        AddRuneFamily("пустыни", "Desert");
+        AddRuneFamily("ледника", "Glacial");
+        AddRuneFamily("вдохновения", "Inspiration");
+        AddRuneFamily("железа", "Iron");
+        AddRuneFamily("разума", "Mind");
+        AddRuneFamily("перерождения", "Rebirth");
+        AddRuneFamily("решительности", "Resolve");
+        AddRuneFamily("мощи", "Robust");
+        AddRuneFamily("камня", "Stone");
+        AddRuneFamily("шторма", "Storm");
+        AddRuneFamily("видения", "Vision");
+        AddRuneFamily("барьера", "Ward");
         Add("Руна агонии Фенумы", "Fenumus' Rune of Agony");
         Add("Агонии", "Fenumus' Rune of Agony");
         Add("Руна высушивания Фенумы", "Fenumus' Rune of Draining");
@@ -257,8 +355,6 @@ internal static class LocalizedNameResolver
         Add("Барьерная руна обломков", "Warding Rune of Salvaging");
         Add("Барьерная руна устойчивости", "Warding Rune of Stability");
         Add("Барьерная руна симбиоза", "Warding Rune of Symbiosis");
-        Add("Большая руна заряда", "Greater Charging Rune");
-        Add("Большая руна барьера", "Greater Ward Rune");
 
         return aliases;
     }
