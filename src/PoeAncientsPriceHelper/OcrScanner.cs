@@ -8,10 +8,11 @@ internal sealed record OcrRow(string NormalizedName, string RawText, int CenterY
 
 internal sealed class OcrScanner : IDisposable
 {
-    // Two independent engines so the two segmentation passes can run concurrently — Tesseract
+    // Independent engines so the segmentation passes can run concurrently — Tesseract
     // engines are single-threaded internally, but separate instances on separate threads are fine.
     private readonly TesseractEngine _engineCol;
     private readonly TesseractEngine _engineSparse;
+    private readonly TesseractEngine _engineBlock;
     private readonly Action<string>? _log;
     private readonly object _logLock = new();
     private const float MinConfidence = 10f;
@@ -28,6 +29,7 @@ internal sealed class OcrScanner : IDisposable
         _log?.Invoke($"OCR language={language}");
         _engineCol = new TesseractEngine(tessdataDir, language, EngineMode.Default);
         _engineSparse = new TesseractEngine(tessdataDir, language, EngineMode.Default);
+        _engineBlock = new TesseractEngine(tessdataDir, language, EngineMode.Default);
     }
 
     // Each row starts with ~3 cost-rune glyphs on the left, then "Nx ItemName". Cropping the
@@ -55,8 +57,10 @@ internal sealed class OcrScanner : IDisposable
         // whichever pass produced the fuller text.
         var tCol = Task.Run(() => RunPass(_engineCol, png, PageSegMode.SingleColumn, height));
         var tSparse = Task.Run(() => RunPass(_engineSparse, png, PageSegMode.SparseText, height));
-        Task.WaitAll(tCol, tSparse);
-        var rows = MergeByPosition(tCol.Result, tSparse.Result);
+        var tBlock = Task.Run(() => RunPass(_engineBlock, png, PageSegMode.SingleBlock, height));
+        Task.WaitAll(tCol, tSparse, tBlock);
+        var rows = MergeByPosition(MergeByPosition(tCol.Result, tSparse.Result), tBlock.Result);
+        rows = RecoverRowsFromGaps(upscaled, rows, height);
 
         // When OCR catches few rows, dump the exact image fed to Tesseract for inspection.
         if (rows.Count <= 2)
@@ -98,6 +102,55 @@ internal sealed class OcrScanner : IDisposable
         using var g = Graphics.FromImage(dst);
         g.DrawImage(src, new Rectangle(0, 0, w, h), new Rectangle(x, y, w, h), GraphicsUnit.Pixel);
         return dst;
+    }
+
+    private IReadOnlyList<OcrRow> RecoverRowsFromGaps(Bitmap upscaledTextBitmap, IReadOnlyList<OcrRow> rows, int regionHeight)
+    {
+        if (rows.Count < 3) return rows;
+
+        var sorted = rows.OrderBy(r => r.CenterY).ToList();
+        var gaps = sorted.Zip(sorted.Skip(1), (a, b) => b.CenterY - a.CenterY)
+            .Where(g => g is >= 45 and <= 90)
+            .OrderBy(g => g)
+            .ToList();
+        if (gaps.Count == 0) return rows;
+
+        var rowStep = gaps[gaps.Count / 2];
+        var recovered = new List<OcrRow>();
+        for (int i = 0; i < sorted.Count - 1; i++)
+        {
+            var gap = sorted[i + 1].CenterY - sorted[i].CenterY;
+            var missing = (int)Math.Round(gap / (double)rowStep) - 1;
+            if (missing <= 0 || missing > 3) continue;
+
+            for (int n = 1; n <= missing; n++)
+            {
+                var centerY = sorted[i].CenterY + (int)Math.Round(gap * n / (double)(missing + 1));
+                var line = ScanLine(upscaledTextBitmap, centerY, rowStep, regionHeight);
+                if (line is not null)
+                    recovered.Add(line);
+            }
+        }
+
+        return recovered.Count == 0 ? rows : MergeByPosition(rows, recovered);
+    }
+
+    private OcrRow? ScanLine(Bitmap upscaledTextBitmap, int centerY, int rowStep, int regionHeight)
+    {
+        var halfHeight = Math.Clamp(rowStep / 2 - 4, 20, 34);
+        var y = Math.Max(0, (centerY - halfHeight) * UpscaleFactor);
+        var h = Math.Min(upscaledTextBitmap.Height - y, halfHeight * 2 * UpscaleFactor);
+        if (h <= 0) return null;
+
+        using var slice = CropBitmap(upscaledTextBitmap, 0, y, upscaledTextBitmap.Width, h);
+        using var pix = Pix.LoadFromMemory(ToPng(slice));
+        using var page = _engineBlock.Process(pix, PageSegMode.SingleLine);
+        var lineRows = ExtractRows(page, regionHeight, UpscaleFactor);
+        var best = lineRows
+            .OrderByDescending(r => r.NormalizedName.Count(char.IsLetter))
+            .FirstOrDefault();
+
+        return best is null ? null : best with { CenterY = centerY };
     }
 
     private IReadOnlyList<OcrRow> ExtractRows(Page page, int bitmapHeight, int scale = 1)
@@ -157,12 +210,11 @@ internal sealed class OcrScanner : IDisposable
     // normalized string BEFORE StripLeadingNoise removes the marker. Returns 1 when absent.
     internal static int ExtractMultiplier(string normalized)
     {
-        var m = Regex.Match(normalized, @"\(\s*(\d{1,3})\s*\)?\s*[\.,;:]*\s*$");
-        if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n >= 1)
+        if (TryExtractParenthesizedTrailingCount(normalized, out var n) && n >= 1)
             return Math.Min(n, 999);
 
         normalized = NormalizeName(normalized);
-        m = Regex.Match(normalized, @"(?<![\p{L}\p{Nd}])(\d{1,3})\s*x(?![\p{L}\p{Nd}])");
+        var m = Regex.Match(normalized, @"(?<![\p{L}\p{Nd}])(\d{1,3})\s*x(?![\p{L}\p{Nd}])");
         if (m.Success && int.TryParse(m.Groups[1].Value, out n) && n >= 1)
             return Math.Min(n, 999);
         return 1;
@@ -170,9 +222,28 @@ internal sealed class OcrScanner : IDisposable
 
     internal static string RemoveTrailingStackCount(string normalized, string rawText)
     {
-        if (!Regex.IsMatch(rawText, @"\(\s*\d{1,3}\s*\)?\s*[\.,;:]*\s*$"))
+        if (!HasTrailingStackCount(rawText))
             return normalized;
         return Regex.Replace(normalized, @"\s+\d{1,3}$", "").Trim();
+    }
+
+    private static bool TryExtractParenthesizedTrailingCount(string rawText, out int count)
+    {
+        count = 0;
+        var m = Regex.Match(rawText, @"\(\s*(\d{1,3})\s*[^\p{L}\p{Nd}]*$");
+        return m.Success && int.TryParse(m.Groups[1].Value, out count);
+    }
+
+    private static bool HasTrailingStackCount(string rawText)
+    {
+        if (TryExtractParenthesizedTrailingCount(rawText, out _))
+            return true;
+
+        if (!Regex.IsMatch(rawText, @"(?<![\p{L}\p{Nd}])\d{1,3}[^\p{L}\p{Nd}]*\)\s*$"))
+            return false;
+
+        return !Regex.IsMatch(rawText, @"(?:уров(?:ень|ня)?|level)\s+\d{1,3}[^\p{L}\p{Nd}]*\)\s*$",
+            RegexOptions.IgnoreCase);
     }
 
     // Strip leading noise: short/numeric tokens ("e", "l8"), then anything before the first
@@ -248,5 +319,5 @@ internal sealed class OcrScanner : IDisposable
         return File.Exists(rusData) ? "rus" : "eng";
     }
 
-    public void Dispose() { _engineCol.Dispose(); _engineSparse.Dispose(); }
+    public void Dispose() { _engineCol.Dispose(); _engineSparse.Dispose(); _engineBlock.Dispose(); }
 }

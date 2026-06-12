@@ -10,6 +10,8 @@ internal static class LocalizedNameResolver
             return gemKey;
         if (TryResolveRussianThaumaturgicFluxKey(normalizedName, out var fluxKey))
             return fluxKey;
+        if (TryResolveRussianFenumusRuneKey(normalizedName, out var fenumusKey))
+            return fenumusKey;
 
         if (RussianAliases.TryGetValue(normalizedName, out var key))
             return key;
@@ -61,6 +63,21 @@ internal static class LocalizedNameResolver
 
         key = $"thaumaturgic flux level {level.Groups[1].Value}";
         return true;
+    }
+
+    private static bool TryResolveRussianFenumusRuneKey(string normalizedName, out string key)
+    {
+        key = "";
+        if (!normalizedName.Contains("фенум") && !normalizedName.Contains("енум"))
+            return false;
+
+        key =
+            normalizedName.Contains("агонии") ? "fenumus rune of agony" :
+            normalizedName.Contains("высушивания") ? "fenumus rune of draining" :
+            normalizedName.Contains("плетения") ? "fenumus rune of spinning" :
+            "";
+
+        return key.Length > 0;
     }
 
     private static Dictionary<string, string> CreateRussianAliases()
@@ -121,8 +138,13 @@ internal static class LocalizedNameResolver
         Add("Руна лета тана Мирка", "Thane Myrk's Rune of Summer");
         Add("Древняя руна правления", "Ancient Rune of Control");
         Add("Руна накопления", "Rune of Accumulation");
+        Add("Руна акробатики", "Rune of Acrobatics");
         Add("Руна охоты", "Rune of the Hunt");
         Add("Адаптивный сплав", "Adaptive Alloy");
+        Add("Руна агонии Фенумы", "Fenumus' Rune of Agony");
+        Add("Агонии", "Fenumus' Rune of Agony");
+        Add("Руна высушивания Фенумы", "Fenumus' Rune of Draining");
+        Add("Руна плетения Фенумы", "Fenumus' Rune of Spinning");
         Add("Барьерная руна уничтожения", "Warding Rune of Annihilation");
         Add("Барьерная руна панциря", "Warding Rune of Armature");
         Add("Барьерная руна телохранителей", "Warding Rune of Bodyguards");
