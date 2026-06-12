@@ -1,61 +1,58 @@
-# Poe Ancients Price Helper
+# Poe Ancients Price Helper RU
 
-A lightweight screen overlay for **Path of Exile 2**. It watches a calibrated region of your screen,
-reads the currency / reward list with OCR, looks up live prices from [poe.ninja](https://poe.ninja/poe2),
-and draws a click-through price overlay next to each item — so you never have to alt-tab to check what a
-stack is worth.
+Оверлей для **Path of Exile 2**, который читает список наград на экране, получает актуальные цены с [poe.ninja](https://poe.ninja/poe2) и показывает цену рядом со строками списка.
 
-## Features
+Эта версия адаптирована под русский клиент PoE2.
 
-- **Live prices** next to each list row, sourced from poe.ninja (auto-refreshed every 30 minutes).
-- **Russian client support** — reads Russian PoE2 item names with Tesseract `rus` OCR data and
-  maps supported Russian names back to poe.ninja's English price keys.
-- **Stack-aware** — shows the total and the per-item price, e.g. `2 (0.5 each)`.
-- **Uncut gems** (skill / spirit / support) priced by exact type **and level** — a row shows `?`
-  rather than a guessed price if the gem type or level can't be read cleanly (neighbouring levels
-  can differ several-fold, so a wrong-level price would be misleading).
-- **Update notifications** — checks GitHub on startup and shows a link in the app when a newer
-  release is available.
-- **Click-through overlay** that never gets in the way of the game.
-- **One-time calibration** — just drag a box around the in-game list panel.
-- **Hotkeys:** `F4` recalibrate · `F3` debug boxes · `Esc` / `Ctrl+Click` hide.
+## Что умеет
 
-## Download & run
+- Распознает русские названия предметов через Tesseract OCR.
+- Сопоставляет поддержанные русские названия с английскими ключами цен poe.ninja.
+- Учитывает количество предметов в строке, например `Сфера царей (3)`.
+- Показывает цены для валюты, неограненных камней и добавленных русских алиасов.
+- Работает как кликабельный сквозной оверлей поверх игры.
+- Позволяет заново выделить область списка через `F4`.
 
-Grab the latest `PoeAncientsPriceHelper-vX.Y.Z-win-x64.zip` from the
-[**Releases**](../../releases) page, unzip it anywhere, and double-click **`Start.cmd`**.
-No install and no .NET runtime required — it's a self-contained Windows x64 build.
+## Запуск
 
-Full usage instructions (with screenshots) are in the `README.html` included in the download.
+Готовая сборка находится в:
 
-> Windows SmartScreen may warn that the app is unsigned — click **More info → Run anyway**.
-
-## Build from source
-
-Requires the .NET 8 SDK.
-
-```sh
-# run tests
-dotnet test src/PoeAncientsPriceHelper.Tests/
-
-# build a self-contained release
-dotnet publish src/PoeAncientsPriceHelper/ -c Release -r win-x64 --self-contained true -o publish
+```text
+publish/win-x64-ru/Start.cmd
 ```
 
-The Russian OCR model is included in this fork. If it needs to be restored, run:
+Запусти `Start.cmd`, выбери лигу и нажми `Calibrate Region` или `F4`, затем выдели область списка наград в игре.
+
+После калибровки нажми `Start`.
+
+## Сборка из исходников
+
+Требуется .NET 8 SDK.
+
+```powershell
+dotnet test src/PoeAncientsPriceHelper.Tests/
+dotnet publish src/PoeAncientsPriceHelper/ -c Release -r win-x64 --self-contained true -o publish/win-x64-ru
+```
+
+Русская OCR-модель уже добавлена в репозиторий. Если файл нужно восстановить:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/Install-RussianOcrData.ps1
 ```
 
-## Tech
+## Проверка
 
-WPF (settings window) + WinForms (overlay), Tesseract OCR, .NET 8 (`net8.0-windows`).
+Последние строки диагностики пишутся в папку запуска:
 
-## Support
+```text
+scan_log.txt
+```
 
-If this tool saves you some alt-tabbing, there's a **☕ Buy me a coffee** button right in the app.
-Thanks!
+Если цена не появилась, проверь, есть ли в логе `HIT`. Если вместо этого строка помечена как `MISS`, значит для распознанного русского названия еще нет алиаса.
 
-## Disclaimer for those who seem to be troubled by it.. 
-Yes it was greatly helped by claude :D never the less it works and its free!
+## Ограничения
+
+- Поддержка русских названий расширяется через алиасы в коде.
+- OCR зависит от выбранной области, масштаба интерфейса и качества распознавания.
+- Готовая сборка не подписана, поэтому Windows SmartScreen может показать предупреждение.
+- Это сторонний инструмент, не связанный с GGG.
