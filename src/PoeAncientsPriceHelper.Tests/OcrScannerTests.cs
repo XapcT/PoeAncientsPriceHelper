@@ -61,6 +61,7 @@ public class OcrScannerTests
     [InlineData("Сфера возвышения (2)", 2)]
     [InlineData("Неогранённый камень духа (уровень 19) (1)", 1)]
     [InlineData("Неогранённый камень духа (уровень 19) (1).", 1)]
+    [InlineData("Руна весны тана Лельда @)", 1)]
     public void ExtractMultiplier_ReadsQuantity(string input, int expected)
     {
         Assert.Equal(expected, OcrScanner.ExtractMultiplier(input));
@@ -68,6 +69,7 @@ public class OcrScannerTests
 
     [Theory]
     [InlineData("неограненный камень духа уровень 19 1", "Неогранённый камень духа (уровень 19) (1).", "неограненный камень духа уровень 19")]
+    [InlineData("руна весны тана лельда", "Руна весны тана Лельда @)", "руна весны тана лельда")]
     [InlineData("uncut skill gem level 20", "Uncut Skill Gem (Level 20)", "uncut skill gem level 20")]
     public void RemoveTrailingStackCount_OnlyRemovesParenthesizedCount(string normalized, string rawText, string expected)
     {

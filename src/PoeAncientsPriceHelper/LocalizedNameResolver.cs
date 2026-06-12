@@ -8,6 +8,8 @@ internal static class LocalizedNameResolver
     {
         if (TryResolveRussianUncutGemKey(normalizedName, out var gemKey))
             return gemKey;
+        if (TryResolveRussianThaumaturgicFluxKey(normalizedName, out var fluxKey))
+            return fluxKey;
 
         if (RussianAliases.TryGetValue(normalizedName, out var key))
             return key;
@@ -44,6 +46,20 @@ internal static class LocalizedNameResolver
             return false;
 
         key = $"uncut {type} gem level {level.Groups[1].Value}";
+        return true;
+    }
+
+    private static bool TryResolveRussianThaumaturgicFluxKey(string normalizedName, out string key)
+    {
+        key = "";
+        if (!normalizedName.Contains("чародейский") || !normalizedName.Contains("расплав"))
+            return false;
+
+        var level = Regex.Match(normalizedName, @"\bуров(?:ень|ня)?\s+(\d{1,2})\b");
+        if (!level.Success)
+            return false;
+
+        key = $"thaumaturgic flux level {level.Groups[1].Value}";
         return true;
     }
 
@@ -99,6 +115,14 @@ internal static class LocalizedNameResolver
         Add("Сфера извлечения", "Orb of Extraction");
         Add("Культивирующая сфера ваал", "Vaal Cultivation Orb");
         Add("Руна мудрости лесной ведьмы Ассандры", "Hedgewitch Assandra's Rune of Wisdom");
+        Add("Руна дикости тана Гирта", "Thane Girt's Rune of Wildness");
+        Add("Руна мастерства тана Граннеля", "Thane Grannell's Rune of Mastery");
+        Add("Руна весны тана Лельда", "Thane Leld's Rune of Spring");
+        Add("Руна лета тана Мирка", "Thane Myrk's Rune of Summer");
+        Add("Древняя руна правления", "Ancient Rune of Control");
+        Add("Руна накопления", "Rune of Accumulation");
+        Add("Руна охоты", "Rune of the Hunt");
+        Add("Адаптивный сплав", "Adaptive Alloy");
 
         return aliases;
     }
