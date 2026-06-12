@@ -59,9 +59,13 @@ public class OcrScannerTests
     [InlineData("oa a 1x greater orb of transmutation", 1)]
     [InlineData("warding rune of protection i", 1)] // roman numeral, not a multiplier
     [InlineData("Сфера возвышения (2)", 2)]
+    [InlineData("Uncut Skill Gem (Level 20)", 1)]
     [InlineData("Неогранённый камень духа (уровень 19) (1)", 1)]
     [InlineData("Неогранённый камень духа (уровень 19) (1).", 1)]
     [InlineData("Руна охоты (1 |", 1)]
+    [InlineData("Руна накопления (7", 1)]
+    [InlineData("Сфера царей (3)", 3)]
+    [InlineData("Сфера царей (3) |", 3)]
     [InlineData("Сфера царей 8)", 1)]
     [InlineData(@"х | Гуна агонии г?енумы \1!)", 1)]
     [InlineData("Руна весны тана Лельда @)", 1)]
@@ -73,10 +77,12 @@ public class OcrScannerTests
     [Theory]
     [InlineData("неограненный камень духа уровень 19 1", "Неогранённый камень духа (уровень 19) (1).", "неограненный камень духа уровень 19")]
     [InlineData("руна охоты 1", "Руна охоты (1 |", "руна охоты")]
+    [InlineData("руна накопления 7", "Руна накопления (7", "руна накопления")]
     [InlineData("сфера царей 8", "Сфера царей 8)", "сфера царей")]
+    [InlineData("сфера царей 3", "Сфера царей (3) |", "сфера царей")]
+    [InlineData("uncut skill gem level 20", "Uncut Skill Gem (Level 20)", "uncut skill gem level 20")]
     [InlineData("гуна агонии г енумы 1", @"х | Гуна агонии г?енумы \1!)", "гуна агонии г енумы")]
     [InlineData("руна весны тана лельда", "Руна весны тана Лельда @)", "руна весны тана лельда")]
-    [InlineData("uncut skill gem level 20", "Uncut Skill Gem (Level 20)", "uncut skill gem level 20")]
     public void RemoveTrailingStackCount_OnlyRemovesParenthesizedCount(string normalized, string rawText, string expected)
     {
         Assert.Equal(expected, OcrScanner.RemoveTrailingStackCount(normalized, rawText));

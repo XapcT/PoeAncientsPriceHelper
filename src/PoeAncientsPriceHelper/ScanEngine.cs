@@ -92,7 +92,7 @@ internal sealed class ScanEngine : IDisposable
         int dismissDark = 0;          // dark frames seen while dismissed — releases the latch when the panel closes
         int cycleCount = 0;
         var lastOcrAt = DateTime.MinValue;
-        const int MinOcrIntervalMs = 300;            // OCR floor while panel is open — fast price turnaround without CPU spikes
+        const int MinOcrIntervalMs = 450;            // OCR cooldown after a pass — responsive without CPU spikes
         const int OpenCycleMs = 100;                 // tight loop while scanning
         const int ClosedCycleMs = 150;               // polling while watching for the panel — snappy detection
         const int DarkToRelease = 3;                 // dark frames before a dismiss latch releases
@@ -179,8 +179,8 @@ internal sealed class ScanEngine : IDisposable
                         var now = DateTime.UtcNow;
                         if ((now - lastOcrAt).TotalMilliseconds >= MinOcrIntervalMs)
                         {
-                            lastOcrAt = now;
                             var ocrRows = scanner.Scan(bmp);
+                            lastOcrAt = DateTime.UtcNow;
                             if (ocrRows.Count == 0)
                             {
                                 // Panel mid-animation or a bad frame — don't disturb locked rows.

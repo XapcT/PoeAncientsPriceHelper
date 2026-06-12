@@ -231,8 +231,20 @@ internal sealed class OcrScanner : IDisposable
     private static bool TryExtractParenthesizedTrailingCount(string rawText, out int count)
     {
         count = 0;
-        var m = Regex.Match(rawText, @"\(\s*(\d{1,3})\s*[^\p{L}\p{Nd}]*$");
-        return m.Success && int.TryParse(m.Groups[1].Value, out count);
+        var closed = Regex.Match(rawText, @"\(\s*(\d{1,3})\s*\)[^\p{L}\p{Nd}]*$");
+        if (closed.Success &&
+            !IsLevelReference(rawText, closed.Index) &&
+            int.TryParse(closed.Groups[1].Value, out count))
+            return true;
+
+        var brokenOne = Regex.Match(rawText, @"\(\s*1[^\p{L}\p{Nd}]*$");
+        if (brokenOne.Success && !IsLevelReference(rawText, brokenOne.Index))
+        {
+            count = 1;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool HasTrailingStackCount(string rawText)
@@ -240,11 +252,21 @@ internal sealed class OcrScanner : IDisposable
         if (TryExtractParenthesizedTrailingCount(rawText, out _))
             return true;
 
-        if (!Regex.IsMatch(rawText, @"(?<![\p{L}\p{Nd}])\d{1,3}[^\p{L}\p{Nd}]*\)\s*$"))
+        var brokenParenthesis = Regex.Match(rawText, @"\(\s*\d{1,3}[^\p{L}\p{Nd}]*$");
+        if (brokenParenthesis.Success && !IsLevelReference(rawText, brokenParenthesis.Index))
+            return true;
+
+        var orphanClose = Regex.Match(rawText, @"(?<![\p{L}\p{Nd}])\d{1,3}[^\p{L}\p{Nd}]*\)\s*$");
+        if (!orphanClose.Success)
             return false;
 
-        return !Regex.IsMatch(rawText, @"(?:уров(?:ень|ня)?|level)\s+\d{1,3}[^\p{L}\p{Nd}]*\)\s*$",
-            RegexOptions.IgnoreCase);
+        return !IsLevelReference(rawText, orphanClose.Index);
+    }
+
+    private static bool IsLevelReference(string rawText, int countStart)
+    {
+        var prefix = rawText[..Math.Clamp(countStart, 0, rawText.Length)];
+        return Regex.IsMatch(prefix, @"(?:уров(?:ень|ня)?|level)\s*$", RegexOptions.IgnoreCase);
     }
 
     // Strip leading noise: short/numeric tokens ("e", "l8"), then anything before the first
