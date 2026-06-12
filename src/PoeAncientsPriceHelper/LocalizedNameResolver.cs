@@ -12,6 +12,10 @@ internal static class LocalizedNameResolver
             return fluxKey;
         if (TryResolveRussianFenumusRuneKey(normalizedName, out var fenumusKey))
             return fenumusKey;
+        if (TryResolveRussianAncientRuneKey(normalizedName, out var ancientRuneKey))
+            return ancientRuneKey;
+        if (TryResolveRussianRuneOfKey(normalizedName, out var runeOfKey))
+            return runeOfKey;
 
         if (RussianAliases.TryGetValue(normalizedName, out var key))
             return key;
@@ -25,6 +29,10 @@ internal static class LocalizedNameResolver
             if (suffixMatch.Key is not null)
                 return suffixMatch.Value;
         }
+
+        if (normalizedName.Length >= 8 &&
+            BestRussianAlias(normalizedName) is { } fuzzyKey)
+            return fuzzyKey;
 
         return normalizedName;
     }
@@ -80,6 +88,93 @@ internal static class LocalizedNameResolver
         return key.Length > 0;
     }
 
+    private static bool TryResolveRussianAncientRuneKey(string normalizedName, out string key)
+    {
+        key = "";
+        if (!normalizedName.Contains("руна") ||
+            (!normalizedName.Contains("древняя") && !normalizedName.Contains("ревняя")))
+            return false;
+
+        var suffix = ResolveByContainedWord(normalizedName, AncientRuneSuffixes);
+        if (suffix is null)
+            return false;
+
+        key = $"ancient rune of {suffix}";
+        return true;
+    }
+
+    private static bool TryResolveRussianRuneOfKey(string normalizedName, out string key)
+    {
+        key = "";
+        if (!normalizedName.Contains("руна"))
+            return false;
+
+        var suffix = ResolveByContainedWord(normalizedName, RuneOfSuffixes);
+        if (suffix is null)
+            return false;
+
+        key = suffix.StartsWith("the ", StringComparison.Ordinal)
+            ? $"rune of {suffix}"
+            : $"rune of {suffix}";
+        return true;
+    }
+
+    private static string? ResolveByContainedWord(string normalizedName, IReadOnlyDictionary<string, string> suffixes)
+    {
+        foreach (var (russian, english) in suffixes.OrderByDescending(x => x.Key.Length))
+        {
+            if (Regex.IsMatch(normalizedName, $@"\b{Regex.Escape(russian)}\b"))
+                return english;
+        }
+        return null;
+    }
+
+    private static string? BestRussianAlias(string normalizedName)
+    {
+        string? best = null;
+        var bestScore = 0.88;
+        foreach (var (alias, key) in RussianAliases)
+        {
+            if (Math.Abs(alias.Length - normalizedName.Length) > 4)
+                continue;
+
+            var score = Similarity(normalizedName, alias);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = key;
+            }
+        }
+        return best;
+    }
+
+    private static double Similarity(string a, string b)
+    {
+        if (a.Length == 0 && b.Length == 0)
+            return 1;
+
+        var dist = Levenshtein(a, b);
+        return 1.0 - (double)dist / Math.Max(a.Length, b.Length);
+    }
+
+    private static int Levenshtein(string a, string b)
+    {
+        var prev = new int[b.Length + 1];
+        var curr = new int[b.Length + 1];
+        for (int j = 0; j <= b.Length; j++) prev[j] = j;
+        for (int i = 1; i <= a.Length; i++)
+        {
+            curr[0] = i;
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                curr[j] = Math.Min(Math.Min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            (prev, curr) = (curr, prev);
+        }
+        return prev[b.Length];
+    }
+
     private static Dictionary<string, string> CreateRussianAliases()
     {
         var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -131,12 +226,12 @@ internal static class LocalizedNameResolver
         Add("Тайный ключ", "Cryptic Key");
         Add("Сфера извлечения", "Orb of Extraction");
         Add("Культивирующая сфера ваал", "Vaal Cultivation Orb");
+        Add("Уникальная бижутерия", "Unique Jewellery");
         Add("Руна мудрости лесной ведьмы Ассандры", "Hedgewitch Assandra's Rune of Wisdom");
         Add("Руна дикости тана Гирта", "Thane Girt's Rune of Wildness");
         Add("Руна мастерства тана Граннеля", "Thane Grannell's Rune of Mastery");
         Add("Руна весны тана Лельда", "Thane Leld's Rune of Spring");
         Add("Руна лета тана Мирка", "Thane Myrk's Rune of Summer");
-        Add("Древняя руна правления", "Ancient Rune of Control");
         Add("Руна накопления", "Rune of Accumulation");
         Add("Руна акробатики", "Rune of Acrobatics");
         Add("Руна охоты", "Rune of the Hunt");
@@ -167,4 +262,44 @@ internal static class LocalizedNameResolver
 
         return aliases;
     }
+
+    private static readonly IReadOnlyDictionary<string, string> AncientRuneSuffixes =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [OcrScanner.NormalizeName("вражды")] = "animosity",
+            [OcrScanner.NormalizeName("правления")] = "control",
+            [OcrScanner.NormalizeName("тлена")] = "decay",
+            [OcrScanner.NormalizeName("подрыва")] = "detonation",
+            [OcrScanner.NormalizeName("находки")] = "discovery",
+            [OcrScanner.NormalizeName("поединка")] = "dueling",
+            [OcrScanner.NormalizeName("мастерства")] = "prowess",
+            [OcrScanner.NormalizeName("расплаты")] = "retaliation",
+            [OcrScanner.NormalizeName("разбивания")] = "shattering",
+            [OcrScanner.NormalizeName("осколков")] = "splinters",
+            [OcrScanner.NormalizeName("орды")] = "the horde",
+            [OcrScanner.NormalizeName("титана")] = "the titan",
+            [OcrScanner.NormalizeName("ведьмовства")] = "witchcraft",
+        };
+
+    private static readonly IReadOnlyDictionary<string, string> RuneOfSuffixes =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [OcrScanner.NormalizeName("накопления")] = "accumulation",
+            [OcrScanner.NormalizeName("акробатики")] = "acrobatics",
+            [OcrScanner.NormalizeName("противоборства")] = "confrontation",
+            [OcrScanner.NormalizeName("противостояния")] = "confrontation",
+            [OcrScanner.NormalizeName("постоянства")] = "consistency",
+            [OcrScanner.NormalizeName("кульминации")] = "culmination",
+            [OcrScanner.NormalizeName("основ")] = "foundations",
+            [OcrScanner.NormalizeName("охвата")] = "reach",
+            [OcrScanner.NormalizeName("досягаемости")] = "reach",
+            [OcrScanner.NormalizeName("славы")] = "renown",
+            [OcrScanner.NormalizeName("цветения")] = "the blossom",
+            [OcrScanner.NormalizeName("охоты")] = "the hunt",
+            [OcrScanner.NormalizeName("призмы")] = "the prism",
+            [OcrScanner.NormalizeName("живого пламени")] = "vital flame",
+            [OcrScanner.NormalizeName("жизненного пламени")] = "vital flame",
+            [OcrScanner.NormalizeName("живучести")] = "vitality",
+            [OcrScanner.NormalizeName("жизненной силы")] = "vitality",
+        };
 }

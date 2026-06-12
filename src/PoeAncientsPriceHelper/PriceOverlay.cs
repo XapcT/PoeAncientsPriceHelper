@@ -222,7 +222,27 @@ internal sealed class PriceOverlayForm : Form
                 bool isTop = pricedCount > 1 && ReferenceEquals(row, topRow);
                 DrawPrice(g, row, priceX, screenY, isTop);
             }
+            else if (ShouldShowUnknownReward(row))
+            {
+                DrawUnknown(g, priceX, screenY);
+            }
         }
+    }
+
+    private static bool ShouldShowUnknownReward(PriceRow row)
+    {
+        var name = row.Name;
+        return name.Contains("unique jewellery", StringComparison.Ordinal) ||
+               name.Contains("unique jewelry", StringComparison.Ordinal);
+    }
+
+    private void DrawUnknown(Graphics g, int x, int screenY)
+    {
+        const string label = "?";
+        DrawBackdrop(g, x, screenY, TextWidth(g, label));
+        using var brush = new SolidBrush(Color.FromArgb(220, 220, 220));
+        int textY = screenY - _priceFont.Height / 2;
+        g.DrawString(label, _priceFont, brush, x, textY);
     }
 
     private void DrawPrice(Graphics g, PriceRow row, int x, int screenY, bool highlightTop)
