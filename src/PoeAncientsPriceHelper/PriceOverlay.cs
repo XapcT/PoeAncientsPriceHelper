@@ -17,7 +17,7 @@ namespace PoeAncientsPriceHelper;
 //   Headhunter — OCR'd "unique belt"        → Headhunter icon + "Headhunter!".
 internal enum MemeKind { None, Mirror, Headhunter }
 
-internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false, MemeKind Meme = MemeKind.None);
+internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false, MemeKind Meme = MemeKind.None, bool KnownReward = false);
 
 internal sealed class PriceOverlayForm : Form
 {
@@ -231,9 +231,7 @@ internal sealed class PriceOverlayForm : Form
 
     private static bool ShouldShowUnknownReward(PriceRow row)
     {
-        var name = row.Name;
-        return name.Contains("unique jewellery", StringComparison.Ordinal) ||
-               name.Contains("unique jewelry", StringComparison.Ordinal);
+        return row.KnownReward;
     }
 
     private void DrawUnknown(Graphics g, int x, int screenY)

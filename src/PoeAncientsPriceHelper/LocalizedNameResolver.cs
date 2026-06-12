@@ -3,6 +3,11 @@ namespace PoeAncientsPriceHelper;
 internal static class LocalizedNameResolver
 {
     private static readonly IReadOnlyDictionary<string, string> RussianAliases = CreateRussianAliases();
+    private static readonly IReadOnlySet<string> KnownRewardKeys =
+        new HashSet<string>(RussianAliases.Values, StringComparer.Ordinal)
+        {
+            "random currency",
+        };
 
     public static string Resolve(string normalizedName)
     {
@@ -36,6 +41,26 @@ internal static class LocalizedNameResolver
             return runeOfKey;
 
         return normalizedName;
+    }
+
+    public static bool IsKnownRewardKey(string normalizedName)
+    {
+        if (KnownRewardKeys.Contains(normalizedName))
+            return true;
+
+        if (Regex.IsMatch(normalizedName, @"^uncut (skill|spirit|support) gem(?: level \d{1,2})?$"))
+            return true;
+
+        if (Regex.IsMatch(normalizedName, @"^thaumaturgic flux level (?:[1-9]|1\d|20)$"))
+            return true;
+
+        if (normalizedName.StartsWith("ancient rune of ", StringComparison.Ordinal))
+            return AncientRuneSuffixes.Values.Contains(normalizedName["ancient rune of ".Length..]);
+
+        if (normalizedName.StartsWith("rune of ", StringComparison.Ordinal))
+            return RuneOfSuffixes.Values.Contains(normalizedName["rune of ".Length..]);
+
+        return false;
     }
 
     private static bool TryResolveRussianUncutGemKey(string normalizedName, out string key)
@@ -245,6 +270,7 @@ internal static class LocalizedNameResolver
         Add("Поглотитель ваал", "Vaal Siphoner");
         Add("Веризий", "Verisium");
         Add("Исключительный веризий", "Exceptional Verisium");
+        Add("Груда веризия", "Verisium Pile");
         Add("Рунный сплав", "Runic Alloy");
         Add("Экспансивный сплав", "Expansive Alloy");
         Add("Лёгкий сплав", "Swift Alloy");
@@ -276,6 +302,32 @@ internal static class LocalizedNameResolver
         Add("Искрящий расплав", "Crackling Flux");
         Add("Пустотный расплав", "Void Flux");
         Add("Сфера Узазы", "Perfect Flux");
+        Add("Ключ к Бухте Криллсона", "Krillson's Bay Key");
+        Add("5 шт. случайной валюты", "Random Currency");
+        Add("Случайная валюта", "Random Currency");
+        Add("Случайной валюты", "Random Currency");
+        Add("Редкий уникальный предмет", "Rare Unique Item");
+        Add("Очень редкий уникальный предмет", "Very Rare Unique Item");
+        Add("Уникальная двуручная булава", "Unique Two Hand Mace");
+        Add("Уникальная одноручная булава", "Unique One Hand Mace");
+        Add("Уникальное кольцо", "Unique Ring");
+        Add("Уникальное копьё", "Unique Spear");
+        Add("Уникальные перчатки", "Unique Gloves");
+        Add("Уникальные сапоги", "Unique Boots");
+        Add("Уникальный амулет", "Unique Amulet");
+        Add("Уникальный боевой посох", "Unique Quarterstaff");
+        Add("Уникальный жезл", "Unique Wand");
+        Add("Уникальный колчан", "Unique Quiver");
+        Add("Уникальный лук", "Unique Bow");
+        Add("Уникальный нательный доспех", "Unique Body Armour");
+        Add("Уникальный посох", "Unique Staff");
+        Add("Уникальный пояс", "Unique Belt");
+        Add("Уникальный самострел", "Unique Crossbow");
+        Add("Уникальный скипетр", "Unique Sceptre");
+        Add("Уникальный талисман", "Unique Talisman");
+        Add("Уникальный фокус", "Unique Focus");
+        Add("Уникальный шлем", "Unique Helmet");
+        Add("Уникальный щит", "Unique Shield");
         Add("Наследие Альдура", "Aldur's Legacy");
         Add("Изобретательность Астрид", "Astrid's Creativity");
         Add("Предательство Альдура", "Betrayal of Aldur");
@@ -308,12 +360,53 @@ internal static class LocalizedNameResolver
         Add("Руна неба Сакаваля", "Saqawal's Rune of the Sky");
         Add("Руна когтей Великого волка", "The Greatwolf's Rune of Claws");
         Add("Руна воли Великого волка", "The Greatwolf's Rune of Willpower");
+        Add("Барьерные приспешники", "Wardbound Minions");
+        Add("Веризиевые проявления", "Verisium Manifestations");
+        Add("Вечный марш", "Eternal March");
+        Add("Взрывная агония", "Detonate Living");
+        Add("Взрывное преображение", "Explosive Transmutation");
+        Add("Дар Воране", "Vorana's Boon");
+        Add("Дар Медведю", "Medved's Boon");
+        Add("Дар Олроту", "Olroth's Boon");
+        Add("Дар Утреду", "Uhtred's Boon");
+        Add("Дождь клинков", "Rain of Blades");
+        Add("Исцеляющие руны", "Healing Runes");
+        Add("Каскад Трискелиона", "Triskelion Cascade");
+        Add("Кольцо морозного пламени", "Frostflame Nova");
+        Add("Кулак Калгуура", "Fist Of Kalguur");
+        Add("Мрачные столпы", "Grim Pillars");
+        Add("Обмен анимой", "Animus Exchange");
+        Add("Осколки анимы", "Animus Splinters");
+        Add("Отвержение", "Refutation");
+        Add("Отталкивание", "Repulsion");
+        Add("Очищающее пламя", "Scouring Flame");
+        Add("Падение небес", "Skyfall");
+        Add("Питание веризием", "Powered by Verisium");
+        Add("Проводящие руны", "Conductive Runes");
+        Add("Пустая оболочка", "Hollow Shell");
+        Add("Реликты Калгуура", "Remnants of Kalguur");
+        Add("Рунное извлечение", "Runic Extraction");
+        Add("Рунное насыщение", "Runic Infusion");
+        Add("Рунное отведение", "Runic Reprieve");
+        Add("Руннокованые клинки", "Runeforged Blades");
+        Add("Силовые линии", "Leylines");
+        Add("Сотрясающие руны", "Concussive Runes");
+        Add("Стылые трупы", "Bitter Dead");
+        Add("Фрагменты прошлого", "Fragments Of The Past");
+        Add("Электрический барьер", "Voltaic Barrier");
+        Add("Неогранённый камень духа", "Uncut Spirit Gem");
+        Add("Неогранённый камень поддержки", "Uncut Support Gem");
+        Add("Неогранённый камень умения", "Uncut Skill Gem");
+        Add("Неограненный камень духа", "Uncut Spirit Gem");
+        Add("Неограненный камень поддержки", "Uncut Support Gem");
+        Add("Неограненный камень умения", "Uncut Skill Gem");
         Add("Руна накопления", "Rune of Accumulation");
         Add("Руна акробатики", "Rune of Acrobatics");
         Add("Руна охоты", "Rune of the Hunt");
         Add("Адаптивный сплав", "Adaptive Alloy");
         Add("Мастерская руна", "Masterwork Rune");
         Add("Руна заряда", "Charging Rune");
+        Add("Малая руна заряда", "Lesser Charging Rune");
         Add("Большая руна заряда", "Greater Charging Rune");
         Add("Безупречная руна заряда", "Perfect Charging Rune");
         Add("Большая руна стремления", "Greater Rune of Alacrity");

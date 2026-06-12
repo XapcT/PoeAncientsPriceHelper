@@ -84,9 +84,28 @@ public class LocalizedNameResolverTests
     [InlineData("Благоговейная подзвёздная руда", "revered starlit ore")]
     [InlineData("Знак Солнца Олрота", "olroth s crest of the sun")]
     [InlineData("Сага Альдура", "aldur s saga")]
+    [InlineData("Груда веризия", "verisium pile")]
+    [InlineData("Ключ к Бухте Криллсона", "krillson s bay key")]
     [InlineData("Жгучий расплав", "blazing flux")]
     [InlineData("Сфера Узазы", "perfect flux")]
     [InlineData("Нагнетатель чародея ваал", "vaal arcanist s infuser")]
+    [InlineData("Малая руна заряда", "lesser charging rune")]
+    [InlineData("5 шт. случайной валюты", "random currency")]
+    [InlineData("Уникальный лук", "unique bow")]
+    [InlineData("Уникальный боевой посох", "unique quarterstaff")]
+    [InlineData("Уникальный нательный доспех", "unique body armour")]
+    [InlineData("Очень редкий уникальный предмет", "very rare unique item")]
+    [InlineData("Барьерные приспешники", "wardbound minions")]
+    [InlineData("Веризиевые проявления", "verisium manifestations")]
+    [InlineData("Вечный марш", "eternal march")]
+    [InlineData("Взрывная агония", "detonate living")]
+    [InlineData("Дар Медведю", "medved s boon")]
+    [InlineData("Каскад Трискелиона", "triskelion cascade")]
+    [InlineData("Кольцо морозного пламени", "frostflame nova")]
+    [InlineData("Питание веризием", "powered by verisium")]
+    [InlineData("Сотрясающие руны", "concussive runes")]
+    [InlineData("Электрический барьер", "voltaic barrier")]
+    [InlineData("Неогранённый камень духа", "uncut spirit gem")]
     [InlineData("Неогранённый камень духа уровень 19", "uncut spirit gem level 19")]
     [InlineData("камень духа уровень 19", "uncut spirit gem level 19")]
     [InlineData("Неограненный камень умения уровень 15", "uncut skill gem level 15")]
@@ -100,5 +119,25 @@ public class LocalizedNameResolverTests
     public void Resolve_UnknownName_ReturnsOriginal()
     {
         Assert.Equal("chilling flux", LocalizedNameResolver.Resolve("chilling flux"));
+    }
+
+    [Theory]
+    [InlineData("unique bow")]
+    [InlineData("unique jewellery")]
+    [InlineData("wardbound minions")]
+    [InlineData("lesser charging rune")]
+    [InlineData("uncut spirit gem")]
+    [InlineData("uncut spirit gem level 19")]
+    [InlineData("thaumaturgic flux level 5")]
+    [InlineData("random currency")]
+    public void IsKnownRewardKey_RecognisesPricelessLeagueRewards(string key)
+    {
+        Assert.True(LocalizedNameResolver.IsKnownRewardKey(key));
+    }
+
+    [Fact]
+    public void IsKnownRewardKey_RejectsRandomOcrNoise()
+    {
+        Assert.False(LocalizedNameResolver.IsKnownRewardKey("some random text"));
     }
 }

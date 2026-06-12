@@ -194,9 +194,11 @@ internal sealed class ScanEngine : IDisposable
                                         $"raw='{r.OcrText.Trim()}' y={r.CenterY} " +
                                         $"{(r.HasPrice ? $"HIT→'{r.Name}'" : "MISS")}")));
 
-                                // Confirm a real exchange panel only when OCR resolves an actual
-                                // priced item — combat effects / stray windows never do.
-                                if (!confirmedOpen && reads.Any(r => r.HasPrice))
+                                // Confirm a real exchange panel when OCR resolves a priced item
+                                // or a known league reward that has no poe.ninja price (generic
+                                // unique classes, low-level fluxes, Kalguuran gems). Stray windows
+                                // still do not confirm because random OCR text is not a known reward.
+                                if (!confirmedOpen && reads.Any(r => r.HasPrice || r.KnownReward))
                                 {
                                     confirmedOpen = true;
                                     suppressHintUntilConfirm = false;   // a real panel is back — re-enable the hint
@@ -283,7 +285,8 @@ internal sealed class ScanEngine : IDisposable
                         true, row.Multiplier, gemKey, true));
                 else
                     // Recognised as an uncut gem but type+level didn't pin to a known price → '?', never fuzzy.
-                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, normalizedName));
+                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, gemKey ?? normalizedName,
+                        KnownReward: true));
                 continue;
             }
 
@@ -330,7 +333,8 @@ internal sealed class ScanEngine : IDisposable
             if (entry != null)
                 rows.Add(new PriceRow(stableY, row.RawText, entry.DivineValue, entry.ExaltedValue, true, row.Multiplier, matchedKey, exact));
             else
-                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, normalizedName));
+                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, normalizedName,
+                    KnownReward: LocalizedNameResolver.IsKnownRewardKey(normalizedName)));
         }
         _lastPositions = newPositions;
         return rows;
