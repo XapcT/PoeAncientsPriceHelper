@@ -123,6 +123,25 @@ internal static class LocalizedNameResolver
         Add("Руна накопления", "Rune of Accumulation");
         Add("Руна охоты", "Rune of the Hunt");
         Add("Адаптивный сплав", "Adaptive Alloy");
+        Add("Барьерная руна уничтожения", "Warding Rune of Annihilation");
+        Add("Барьерная руна панциря", "Warding Rune of Armature");
+        Add("Барьерная руна телохранителей", "Warding Rune of Bodyguards");
+        Add("Барьерная руна храбрости", "Warding Rune of Courage");
+        Add("Барьерная руна отчаяния", "Warding Rune of Desperation");
+        Add("Барьерная руна расщепления", "Warding Rune of Disintegration");
+        Add("Барьерная руна равноденствия", "Warding Rune of Equinox");
+        Add("Барьерная руна скольжения", "Warding Rune of Glancing");
+        Add("Барьерная руна сердца", "Warding Rune of Heart");
+        Add("Барьерная руна опустевания", "Warding Rune of Hollowing");
+        Add("Барьерная руна пропитания", "Warding Rune of Nourishment");
+        Add("Барьерная руна одержимости", "Warding Rune of Obsession");
+        Add("Барьерная руна защиты", "Warding Rune of Protection");
+        Add("Барьерная руна укрепления", "Warding Rune of Reinforcement");
+        Add("Барьерная руна обломков", "Warding Rune of Salvaging");
+        Add("Барьерная руна устойчивости", "Warding Rune of Stability");
+        Add("Барьерная руна симбиоза", "Warding Rune of Symbiosis");
+        Add("Большая руна заряда", "Greater Charging Rune");
+        Add("Большая руна барьера", "Greater Ward Rune");
 
         return aliases;
     }
