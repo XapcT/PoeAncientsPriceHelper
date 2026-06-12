@@ -15,6 +15,7 @@ internal sealed class OcrScanner : IDisposable
     private readonly TesseractEngine _engineBlock;
     private readonly Action<string>? _log;
     private readonly object _logLock = new();
+    private bool _debugDumped;
     private const float MinConfidence = 10f;
     private const int UpscaleFactor = 2;
     private const int MinNameLength = 4;
@@ -57,16 +58,16 @@ internal sealed class OcrScanner : IDisposable
         // whichever pass produced the fuller text.
         var tCol = Task.Run(() => RunPass(_engineCol, png, PageSegMode.SingleColumn, height));
         var tSparse = Task.Run(() => RunPass(_engineSparse, png, PageSegMode.SparseText, height));
-        var tBlock = Task.Run(() => RunPass(_engineBlock, png, PageSegMode.SingleBlock, height));
-        Task.WaitAll(tCol, tSparse, tBlock);
-        var rows = MergeByPosition(MergeByPosition(tCol.Result, tSparse.Result), tBlock.Result);
+        Task.WaitAll(tCol, tSparse);
+        var rows = MergeByPosition(tCol.Result, tSparse.Result);
         rows = RecoverRowsFromGaps(upscaled, rows, height);
 
         // When OCR catches few rows, dump the exact image fed to Tesseract for inspection.
-        if (rows.Count <= 2)
+        if (rows.Count <= 2 && !_debugDumped)
         {
             try { upscaled.Save(Path.Combine(AppContext.BaseDirectory, "debug_ocr.png"), System.Drawing.Imaging.ImageFormat.Png); }
             catch { /* best-effort diagnostic */ }
+            _debugDumped = true;
         }
         return rows;
     }
@@ -106,7 +107,7 @@ internal sealed class OcrScanner : IDisposable
 
     private IReadOnlyList<OcrRow> RecoverRowsFromGaps(Bitmap upscaledTextBitmap, IReadOnlyList<OcrRow> rows, int regionHeight)
     {
-        if (rows.Count < 3) return rows;
+        if (rows.Count < 3 || rows.Count > 10) return rows;
 
         var sorted = rows.OrderBy(r => r.CenterY).ToList();
         var gaps = sorted.Zip(sorted.Skip(1), (a, b) => b.CenterY - a.CenterY)
@@ -191,7 +192,7 @@ internal sealed class OcrScanner : IDisposable
         // can tell "Tesseract only saw 1 line" from "saw 5 but the filters dropped 4".
         // Runs on a pass thread — serialize so two concurrent passes don't race the logger.
         if (rows.Count <= 2 && diag.Count > 0)
-            lock (_logLock) { _log?.Invoke($"OCR raw {diag.Count} lines → " + string.Join(" | ", diag)); }
+            lock (_logLock) { _log?.Invoke($"OCR raw {diag.Count} lines → " + string.Join(" | ", diag.Take(20))); }
 
         return rows;
     }

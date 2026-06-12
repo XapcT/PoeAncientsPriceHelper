@@ -92,7 +92,7 @@ internal sealed class ScanEngine : IDisposable
         int dismissDark = 0;          // dark frames seen while dismissed — releases the latch when the panel closes
         int cycleCount = 0;
         var lastOcrAt = DateTime.MinValue;
-        const int MinOcrIntervalMs = 100;            // OCR floor while panel is open — fast price turnaround
+        const int MinOcrIntervalMs = 300;            // OCR floor while panel is open — fast price turnaround without CPU spikes
         const int OpenCycleMs = 100;                 // tight loop while scanning
         const int ClosedCycleMs = 150;               // polling while watching for the panel — snappy detection
         const int DarkToRelease = 3;                 // dark frames before a dismiss latch releases
