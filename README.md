@@ -8,6 +8,8 @@ stack is worth.
 ## Features
 
 - **Live prices** next to each list row, sourced from poe.ninja (auto-refreshed every 30 minutes).
+- **Russian client support** — reads Russian PoE2 item names with Tesseract `rus` OCR data and
+  maps supported Russian names back to poe.ninja's English price keys.
 - **Stack-aware** — shows the total and the per-item price, e.g. `2 (0.5 each)`.
 - **Uncut gems** (skill / spirit / support) priced by exact type **and level** — a row shows `?`
   rather than a guessed price if the gem type or level can't be read cleanly (neighbouring levels
@@ -38,6 +40,12 @@ dotnet test src/PoeAncientsPriceHelper.Tests/
 
 # build a self-contained release
 dotnet publish src/PoeAncientsPriceHelper/ -c Release -r win-x64 --self-contained true -o publish
+```
+
+The Russian OCR model is included in this fork. If it needs to be restored, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/Install-RussianOcrData.ps1
 ```
 
 ## Tech

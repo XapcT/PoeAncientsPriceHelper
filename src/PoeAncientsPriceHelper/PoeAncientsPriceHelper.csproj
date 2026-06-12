@@ -34,5 +34,9 @@
     <PackageReference Include="Tesseract.Data.English" Version="4.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="tessdata\rus.traineddata" Condition="Exists('tessdata\rus.traineddata')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 
 </Project>

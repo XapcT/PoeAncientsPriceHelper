@@ -10,6 +10,8 @@ public class OcrScannerTests
     [InlineData("Skill: Grip Filters", "skill grip filters")]
     [InlineData("  VERISIUM FLUX  ", "verisium flux")]
     [InlineData("Rune-of-Aldur", "rune of aldur")]
+    [InlineData("Неогранённый камень духа (уровень 19) (1)", "неограненный камень духа уровень 19 1")]
+    [InlineData("Сфера царей", "сфера царей")]
     public void NormalizeName_ProducesExpectedKey(string input, string expected)
     {
         Assert.Equal(expected, OcrScanner.NormalizeName(input));
@@ -40,6 +42,7 @@ public class OcrScannerTests
     [InlineData("hefod 1x ancient rune of the titan", "ancient rune of the titan")]
     [InlineData("nerog 11x ancient rune of discovery", "ancient rune of discovery")]
     [InlineData("ancient rune of shattering", "ancient rune of shattering")]
+    [InlineData("сфера царей", "сфера царей")]
     public void StripLeadingNoise_RemovesQuantityPrefix(string input, string expected)
     {
         Assert.Equal(expected, OcrScanner.StripLeadingNoise(input));
@@ -55,8 +58,19 @@ public class OcrScannerTests
     [InlineData("nerog 11x ancient rune of discovery", 11)]
     [InlineData("oa a 1x greater orb of transmutation", 1)]
     [InlineData("warding rune of protection i", 1)] // roman numeral, not a multiplier
+    [InlineData("Сфера возвышения (2)", 2)]
+    [InlineData("Неогранённый камень духа (уровень 19) (1)", 1)]
+    [InlineData("Неогранённый камень духа (уровень 19) (1).", 1)]
     public void ExtractMultiplier_ReadsQuantity(string input, int expected)
     {
         Assert.Equal(expected, OcrScanner.ExtractMultiplier(input));
+    }
+
+    [Theory]
+    [InlineData("неограненный камень духа уровень 19 1", "Неогранённый камень духа (уровень 19) (1).", "неограненный камень духа уровень 19")]
+    [InlineData("uncut skill gem level 20", "Uncut Skill Gem (Level 20)", "uncut skill gem level 20")]
+    public void RemoveTrailingStackCount_OnlyRemovesParenthesizedCount(string normalized, string rawText, string expected)
+    {
+        Assert.Equal(expected, OcrScanner.RemoveTrailingStackCount(normalized, rawText));
     }
 }

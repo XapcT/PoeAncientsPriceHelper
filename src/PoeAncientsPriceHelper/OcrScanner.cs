@@ -23,9 +23,11 @@ internal sealed class OcrScanner : IDisposable
 
     public OcrScanner(string tessdataDir, Action<string>? log = null)
     {
-        _engineCol = new TesseractEngine(tessdataDir, "eng", EngineMode.Default);
-        _engineSparse = new TesseractEngine(tessdataDir, "eng", EngineMode.Default);
         _log = log;
+        var language = ResolveLanguage(tessdataDir);
+        _log?.Invoke($"OCR language={language}");
+        _engineCol = new TesseractEngine(tessdataDir, language, EngineMode.Default);
+        _engineSparse = new TesseractEngine(tessdataDir, language, EngineMode.Default);
     }
 
     // Each row starts with ~3 cost-rune glyphs on the left, then "Nx ItemName". Cropping the
@@ -120,8 +122,8 @@ internal sealed class OcrScanner : IDisposable
             else
             {
                 var normalizedRaw = NormalizeName(text);
-                multiplier = ExtractMultiplier(normalizedRaw);
-                normalized = StripLeadingNoise(normalizedRaw);
+                multiplier = ExtractMultiplier(text);
+                normalized = StripLeadingNoise(RemoveTrailingStackCount(normalizedRaw, text));
                 if (normalized.Length < MinNameLength) reject = "short";
                 else if (!HasLongWord(normalized, MinWordLength)) reject = "noword";
             }
@@ -155,10 +157,22 @@ internal sealed class OcrScanner : IDisposable
     // normalized string BEFORE StripLeadingNoise removes the marker. Returns 1 when absent.
     internal static int ExtractMultiplier(string normalized)
     {
-        var m = Regex.Match(normalized, @"(?<![a-z0-9])(\d{1,3})\s*x(?![a-z0-9])");
+        var m = Regex.Match(normalized, @"\(\s*(\d{1,3})\s*\)?\s*[\.,;:]*\s*$");
         if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n >= 1)
             return Math.Min(n, 999);
+
+        normalized = NormalizeName(normalized);
+        m = Regex.Match(normalized, @"(?<![\p{L}\p{Nd}])(\d{1,3})\s*x(?![\p{L}\p{Nd}])");
+        if (m.Success && int.TryParse(m.Groups[1].Value, out n) && n >= 1)
+            return Math.Min(n, 999);
         return 1;
+    }
+
+    internal static string RemoveTrailingStackCount(string normalized, string rawText)
+    {
+        if (!Regex.IsMatch(rawText, @"\(\s*\d{1,3}\s*\)?\s*[\.,;:]*\s*$"))
+            return normalized;
+        return Regex.Replace(normalized, @"\s+\d{1,3}$", "").Trim();
     }
 
     // Strip leading noise: short/numeric tokens ("e", "l8"), then anything before the first
@@ -171,7 +185,7 @@ internal sealed class OcrScanner : IDisposable
         // If a quantity marker still exists, drop everything before (and including) it
         var qm = Regex.Match(s, @"(?<!\w)\d+\s*x\s+");
         if (qm.Success) s = s.Substring(qm.Index + qm.Length);
-        s = Regex.Replace(s, @"^[^a-z]+", "");
+        s = Regex.Replace(s, @"^[^\p{L}]+", "");
         return s.Trim();
     }
 
@@ -222,9 +236,16 @@ internal sealed class OcrScanner : IDisposable
     internal static string NormalizeName(string text)
     {
         var s = text.ToLowerInvariant();
-        s = Regex.Replace(s, @"[^\w\s]", " ");
+        s = s.Replace('ё', 'е');
+        s = Regex.Replace(s, @"[^\p{L}\p{Nd}\s]", " ");
         s = Regex.Replace(s, @"\s+", " ");
         return s.Trim();
+    }
+
+    private static string ResolveLanguage(string tessdataDir)
+    {
+        var rusData = Path.Combine(tessdataDir, "rus.traineddata");
+        return File.Exists(rusData) ? "rus" : "eng";
     }
 
     public void Dispose() { _engineCol.Dispose(); _engineSparse.Dispose(); }
