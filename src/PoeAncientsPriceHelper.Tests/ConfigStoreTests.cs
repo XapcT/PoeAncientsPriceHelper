@@ -1,7 +1,6 @@
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using Newtonsoft.Json;
 using PoeAncientsPriceHelper;
 
 namespace PoeAncientsPriceHelper.Tests;
@@ -70,21 +69,56 @@ public class ConfigStoreTests
         Assert.Equal("Runes of Aldur", cfg.LeagueName);
     }
 
-    // Helpers that redirect ConfigStore's path via a temp directory.
-    // ConfigStore uses AppContext.BaseDirectory which we can't easily swap,
-    // so we exercise the logic directly via JSON round-trip here.
+    [Fact]
+    public void Load_MigratesLegacyConfig_WhenAppDataConfigMissing()
+    {
+        using var dir = new TempDir();
+        var appDataDir = Path.Combine(dir.Path, "appdata");
+        var legacyDir = Path.Combine(dir.Path, "legacy");
+
+        var legacyConfig = new AppConfig
+        {
+            RegionX = 60,
+            RegionY = 194,
+            RegionWidth = 670,
+            RegionHeight = 714,
+            StartStopHotkey = "VcF8"
+        };
+        SaveTo(legacyDir, legacyConfig);
+
+        var loaded = ConfigStore.LoadFromPaths(ConfigPath(appDataDir), ConfigPath(legacyDir));
+
+        Assert.Equal(new Rectangle(60, 194, 670, 714), loaded.RegionRect);
+        Assert.Equal("VcF8", loaded.StartStopHotkey);
+        Assert.True(File.Exists(ConfigPath(appDataDir)));
+        Assert.Equal(new Rectangle(60, 194, 670, 714), LoadFrom(appDataDir).RegionRect);
+    }
+
+    [Fact]
+    public void Load_PrefersAppDataConfig_WhenBothConfigsExist()
+    {
+        using var dir = new TempDir();
+        var appDataDir = Path.Combine(dir.Path, "appdata");
+        var legacyDir = Path.Combine(dir.Path, "legacy");
+
+        SaveTo(appDataDir, new AppConfig { StartStopHotkey = "VcF6" });
+        SaveTo(legacyDir, new AppConfig { StartStopHotkey = "VcF8" });
+
+        var loaded = ConfigStore.LoadFromPaths(ConfigPath(appDataDir), ConfigPath(legacyDir));
+
+        Assert.Equal("VcF6", loaded.StartStopHotkey);
+    }
+
     private static AppConfig LoadFrom(string dir)
     {
-        var path = Path.Combine(dir, "config.json");
-        if (!File.Exists(path)) return new AppConfig();
-        try { return JsonConvert.DeserializeObject<AppConfig>(File.ReadAllText(path)) ?? new AppConfig(); }
-        catch { return new AppConfig(); }
+        return ConfigStore.LoadFromPaths(ConfigPath(dir), Path.Combine(dir, "missing-legacy.json"));
     }
 
     private static void SaveTo(string dir, AppConfig cfg)
     {
-        File.WriteAllText(Path.Combine(dir, "config.json"),
-            JsonConvert.SerializeObject(cfg, Formatting.Indented));
+        ConfigStore.SaveToPath(ConfigPath(dir), cfg);
     }
+
+    private static string ConfigPath(string dir) => Path.Combine(dir, "config.json");
 }
 

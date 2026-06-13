@@ -74,7 +74,7 @@ public partial class MainWindow : MetroWindow
             if (rem <= cur) return;
 
             _updateUrl = (string?)obj["html_url"];
-            Dispatcher.BeginInvoke(() =>
+            _ = Dispatcher.BeginInvoke(() =>
             {
                 UpdateLink.Text = $"Доступно обновление: v{rem.Major}.{rem.Minor}.{rem.Build}";
                 UpdateLink.Visibility = Visibility.Visible;
