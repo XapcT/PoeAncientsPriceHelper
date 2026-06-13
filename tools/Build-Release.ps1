@@ -12,9 +12,11 @@ $project = Join-Path $repo "src\PoeAncientsPriceHelper\PoeAncientsPriceHelper.cs
 $tests = Join-Path $repo "src\PoeAncientsPriceHelper.Tests\PoeAncientsPriceHelper.Tests.csproj"
 
 $dotnetCandidates = @(
+    $(if ($env:DOTNET_ROOT) { Join-Path $env:DOTNET_ROOT "dotnet.exe" }),
     (Join-Path $repo "..\.dotnet-sdk\dotnet.exe"),
+    "D:\Soft\PoE2_Build\.dotnet-sdk\dotnet.exe",
     "dotnet"
-)
+) | Where-Object { $_ }
 $dotnet = $dotnetCandidates | Where-Object {
     if ([System.IO.Path]::IsPathRooted($_)) { Test-Path -LiteralPath $_ } else { Get-Command $_ -ErrorAction SilentlyContinue }
 } | Select-Object -First 1
