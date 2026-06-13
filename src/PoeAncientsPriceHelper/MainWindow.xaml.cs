@@ -7,6 +7,8 @@ namespace PoeAncientsPriceHelper;
 
 public partial class MainWindow : MetroWindow
 {
+    private const string UpdateRepository = "XapcT/PoeAncientsPriceHelper";
+
     private AppConfig _config = new();
     private PriceRepository? _repo;
     private IconCache? _icons;
@@ -53,8 +55,8 @@ public partial class MainWindow : MetroWindow
             if (current is null) return;
 
             var req = new HttpRequestMessage(HttpMethod.Get,
-                "https://api.github.com/repos/pedro-quiterio/PoeAncientsPriceHelper/releases/latest");
-            req.Headers.TryAddWithoutValidation("User-Agent", "PoeAncientsPriceHelper");  // GitHub 403s without one
+                $"https://api.github.com/repos/{UpdateRepository}/releases/latest");
+            req.Headers.TryAddWithoutValidation("User-Agent", "PoeAncientsPriceHelper-RU");  // GitHub 403s without one
             req.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
 
             var resp = await _http.SendAsync(req);
@@ -74,7 +76,7 @@ public partial class MainWindow : MetroWindow
             _updateUrl = (string?)obj["html_url"];
             Dispatcher.BeginInvoke(() =>
             {
-                UpdateLink.Text = $"⬆ Update available: v{rem.Major}.{rem.Minor}.{rem.Build} — click to download";
+                UpdateLink.Text = $"Доступно обновление: v{rem.Major}.{rem.Minor}.{rem.Build}";
                 UpdateLink.Visibility = Visibility.Visible;
             });
         }
@@ -142,6 +144,8 @@ public partial class MainWindow : MetroWindow
 
         UpdateStatusLabel();
         StartStopButton.IsEnabled = _config.IsCalibrated;
+        if (!_config.IsCalibrated)
+            StatusLabel.Text += "  ·  сначала откалибруй область списка (F4)";
     }
 
     // The 30-min background refresh fires on a thread-pool thread — marshal to the UI thread
@@ -154,19 +158,6 @@ public partial class MainWindow : MetroWindow
         if (_repo is null) return;
         string fetched = _repo.LastFetchedAt is { } t ? t.ToString("MMM d HH:mm") : "never";
         StatusLabel.Text = $"{_repo.ItemCount} items loaded  ·  last fetch {fetched}";
-    }
-
-    private void DonateButton_Click(object sender, RoutedEventArgs e)
-    {
-        const string url = "https://www.paypal.com/donate/?business=pedro.levi.magic%40gmail.com&currency_code=USD&item_name=PoeAncientsPriceHelper";
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[Donate] failed to open browser: {ex.Message}");
-        }
     }
 
     // internal so the App-level hook (configurable Calibrate key) can trigger it too.
