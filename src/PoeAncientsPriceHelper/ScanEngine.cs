@@ -111,6 +111,8 @@ internal sealed class ScanEngine : IDisposable
         int brightStreak = 0;
         int darkStreak = 0;
         int dismissDark = 0;          // dark frames seen while dismissed — releases the latch when the panel closes
+        int staleCount = 0;           // consecutive OCR passes with no priced rows — clears stale overlay on loading screens
+        const int StaleLimit = 5;     // consecutive stale passes before clearing (~400ms at 80ms interval)
         int cycleCount = 0;
         var lastOcrAt = DateTime.MinValue;
         const int MinOcrIntervalMs = 80;             // OCR floor while panel is open — fast price turnaround
@@ -156,6 +158,7 @@ internal sealed class ScanEngine : IDisposable
                     }
                     isOpen = false; confirmedOpen = false; brightStreak = 0; darkStreak = 0;
                     slots.Clear(); lastRows = [];
+                    staleCount = 0;
                     _showing = false;
                     // Always push when dismissed to clear the overlay, and reset the change-tracker
                     // so the next real state is treated as new.
@@ -207,8 +210,21 @@ internal sealed class ScanEngine : IDisposable
                             var ocrRows = scanner.Scan(bmp);
                             if (ocrRows.Count == 0)
                             {
-                                // Panel mid-animation or a bad frame — don't disturb locked rows.
-                                Log("OCR returned 0 rows");
+                                staleCount++;
+                                if (staleCount >= StaleLimit)
+                                {
+                                    // Sustained 0-row reads — the panel is gone (loading screen, scene
+                                    // change). Clear everything so stale prices don't linger on screen.
+                                    Log($"OCR 0 rows for {staleCount} passes — clearing stale overlay");
+                                    slots.Clear();
+                                    lastRows = [];
+                                    confirmedOpen = false;
+                                }
+                                else
+                                {
+                                    // Brief animation frame — don't disturb locked rows yet.
+                                    Log($"OCR returned 0 rows ({staleCount}/{StaleLimit})");
+                                }
                             }
                             else
                             {
@@ -218,18 +234,36 @@ internal sealed class ScanEngine : IDisposable
                                         $"raw='{r.OcrText.Trim()}' y={r.CenterY} " +
                                         $"{(r.HasPrice ? $"HIT→'{r.Name}'" : "MISS")}")));
 
-                                // Confirm a real exchange panel only when OCR resolves an actual
-                                // priced item — combat effects / stray windows never do.
-                                if (!confirmedOpen && reads.Any(r => r.HasPrice))
+                                if (reads.Any(r => r.HasPrice))
                                 {
-                                    confirmedOpen = true;
-                                    suppressHintUntilConfirm = false;   // a real panel is back — re-enable the hint
-                                    Log("panel CONFIRMED (priced row found)");
+                                    staleCount = 0;
+                                    // Confirm a real exchange panel only when OCR resolves an actual
+                                    // priced item — combat effects / stray windows never do.
+                                    if (!confirmedOpen)
+                                    {
+                                        confirmedOpen = true;
+                                        suppressHintUntilConfirm = false;   // a real panel is back — re-enable the hint
+                                        Log("panel CONFIRMED (priced row found)");
+                                    }
+                                }
+                                else
+                                {
+                                    // OCR found text rows but none matched a price. Track this — if it
+                                    // persists, the panel content is gone (loading screen tips, combat
+                                    // effects, etc.) and stale locked prices should be cleared.
+                                    staleCount++;
+                                    if (staleCount >= StaleLimit)
+                                    {
+                                        Log($"No priced rows for {staleCount} passes — clearing stale overlay");
+                                        slots.Clear();
+                                        lastRows = [];
+                                        confirmedOpen = false;
+                                    }
                                 }
 
-                                // Per-row slots: a row locks once confirmed, then stays fixed;
-                                // unpriced rows keep being retried every pass.
-                                lastRows = MergeReads(slots, reads);
+                                // Only merge reads into slots if we haven't just cleared them.
+                                if (staleCount < StaleLimit)
+                                    lastRows = MergeReads(slots, reads);
                             }
                         }
                     }
@@ -238,6 +272,7 @@ internal sealed class ScanEngine : IDisposable
                         slots.Clear();
                         lastRows = [];
                         confirmedOpen = false;
+                        staleCount = 0;
                     }
 
                     // "reading" = brightness says a panel is up but OCR hasn't confirmed prices yet.
