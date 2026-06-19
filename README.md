@@ -14,6 +14,10 @@ stack is worth.
   can differ several-fold, so a wrong-level price would be misleading).
 - **GPU-accelerated capture** — uses Windows Graphics Capture (WGC) by default for low CPU usage,
   with automatic fallback to legacy GDI if WGC is unavailable.
+- **Windows OCR engine** — uses the native `Windows.Media.Ocr` (WinRT) for fast, accurate detection
+  of on-screen text. No external OCR dependencies.
+- **Update notifications** — checks GitHub on startup and shows a link in the app when a newer
+  release is available.
 - **Click-through overlay** that never gets in the way of the game.
 - **One-time calibration** — just drag a box around the in-game list panel.
 - **Hotkeys:** `F5` start/stop · `F4` recalibrate · `F3` debug boxes · `Esc` / `Ctrl+Click` hide.
@@ -21,15 +25,18 @@ stack is worth.
 
 ## Download & run
 
-Grab the latest release from the
+Grab the latest `PoeAncientsPriceHelper-vX.Y.Z-win-x64.zip` from the
 [**Releases**](../../releases) page, unzip it anywhere, and double-click **`Start.cmd`**.
 No install and no .NET runtime required — it's a self-contained Windows x64 build.
+
+Full usage instructions (with screenshots) are in the `README.html` included in the download.
 
 > Windows SmartScreen may warn that the app is unsigned — click **More info → Run anyway**.
 
 ## Build from source
 
-Requires the **.NET 10 SDK** and **Windows 10 version 2004+** / Windows 11.
+Requires the **.NET 10 SDK** ([download](https://dotnet.microsoft.com/en-us/download/dotnet/10.0))
+and **Windows 10 version 2004+** / Windows 11.
 
 ```sh
 # restore + build
@@ -57,16 +64,16 @@ crashing.
 ## Tech
 
 - **.NET 10** (`net10.0-windows10.0.19041.0`) — WPF (settings window) + WinForms (overlay)
-- **Windows.Media.Ocr** OCR with 3x upscaling for glyph accuracy
-- **Windows Graphics Capture** via Vortice.Direct3D11 + WinRT interop
-- **poe.ninja** API for live price data (parallel fetch, 30-min auto-refresh)
+- **Windows.Media.Ocr** (WinRT) for OCR — no external dependencies
+- **Windows Graphics Capture** via Vortice.Direct3D11 + WinRT interop for screen capture
+- **poe.ninja** API for live price data (parallel fetch over HTTP/2, 30-min auto-refresh)
 - **SharpHook** for global hotkeys
+- **MahApps.Metro** for the settings window UI
 
 ## Support
 
-If this tool saves you some alt-tabbing, there's a **Buy me a coffee** button right in the app.
+If this tool saves you some alt-tabbing, there's a **☕ Buy me a coffee** button right in the app.
 Thanks!
 
-## Disclaimer
-
-Yes it was greatly helped by AI :D nevertheless it works and it's free!
+## Disclaimer for those who seem to be troubled by it.. 
+Yes it was greatly helped by AI :D never the less it works and its free!
