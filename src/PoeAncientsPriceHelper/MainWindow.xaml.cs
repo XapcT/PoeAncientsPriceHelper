@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.Windows;
 using MahApps.Metro.Controls;
@@ -13,7 +14,19 @@ public partial class MainWindow : MetroWindow
     private ScanEngine? _engine;
     // 15s cap so a stalled poe.ninja/poecdn connection can't hang a whole fetch cycle for the
     // default 100s. Per-fetch cancellation (shutdown) is handled inside PriceRepository.
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    // HTTP/2 + compression enabled for faster parallel fetches (5 concurrent requests multiplexed
+    // over a single connection instead of 5 separate TCP handshakes).
+    private readonly HttpClient _http = new(new SocketsHttpHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        MaxConnectionsPerServer = 4
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(15),
+        DefaultRequestVersion = HttpVersion.Version20,
+        DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+    };
     private bool _loading;
     // Reentrancy guard for LeagueBox_SelectionChanged → StartupAsync (rapid league changes could
     // otherwise overlap and dispose repo/icons mid-fetch). Also remembers whether the scanner was
@@ -79,7 +92,7 @@ public partial class MainWindow : MetroWindow
             if (rem <= cur) return;
 
             _updateUrl = (string?)obj["html_url"];
-            Dispatcher.BeginInvoke(() =>
+            _ = Dispatcher.BeginInvoke(() =>
             {
                 UpdateLink.Text = $"⬆ Update available: v{rem.Major}.{rem.Minor}.{rem.Build} — click to download";
                 UpdateLink.Visibility = Visibility.Visible;
