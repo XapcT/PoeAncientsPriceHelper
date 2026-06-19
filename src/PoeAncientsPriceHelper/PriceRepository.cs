@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
+using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -9,19 +10,33 @@ namespace PoeAncientsPriceHelper;
 // ExaltedValue = DivineValue * core.rates.exalted (computed, for display when < 1 divine)
 internal sealed record PriceEntry(decimal DivineValue, decimal ExaltedValue);
 
+// Atomic snapshot of prices + length index, published together so the scan loop can never
+// see a new _prices with a stale _keysByLength (or vice versa) during a background refresh.
+internal sealed record PriceSnapshot(
+    IReadOnlyDictionary<string, PriceEntry> Prices,
+    IReadOnlyDictionary<int, List<string>> KeysByLength);
+
 internal sealed class PriceRepository : IDisposable
 {
     private readonly HttpClient _http;
-    private volatile IReadOnlyDictionary<string, PriceEntry> _prices =
-        new ReadOnlyDictionary<string, PriceEntry>(new Dictionary<string, PriceEntry>());
+    private static readonly PriceSnapshot Empty = new(
+        new ReadOnlyDictionary<string, PriceEntry>(new Dictionary<string, PriceEntry>()),
+        new Dictionary<int, List<string>>());
+    private volatile PriceSnapshot _snapshot = Empty;
     private System.Threading.Timer? _timer;
     // Cancelled on Dispose so a fetch in flight at shutdown (or one stuck behind the HttpClient
     // timeout) is abandoned cleanly instead of running on against a disposed client.
     private readonly CancellationTokenSource _cts = new();
+    private int _priceGeneration;
 
-    public IReadOnlyDictionary<string, PriceEntry> Prices => _prices;
+    public PriceSnapshot Current => _snapshot;
+    public IReadOnlyDictionary<string, PriceEntry> Prices => _snapshot.Prices;
+    // Snapshot of the length-bucketed key index, for the fuzzy matcher in ScanEngine.
+    public IReadOnlyDictionary<int, List<string>> KeysByLength => _snapshot.KeysByLength;
     public DateTime? LastFetchedAt { get; private set; }
-    public int ItemCount => _prices.Count;
+    public int ItemCount => _snapshot.Prices.Count;
+    // Bumped each time _prices is replaced; ScanEngine uses it to invalidate its resolution cache.
+    public int PriceGeneration => Volatile.Read(ref _priceGeneration);
 
     // Raised after every successful fetch (initial + each 30-min background refresh) so the UI can
     // refresh its "last fetch" label — which otherwise stays frozen at the startup time. Fires on a
@@ -53,15 +68,23 @@ internal sealed class PriceRepository : IDisposable
     {
         try
         {
+            // Fetch all exchange types concurrently (independent HTTP requests) instead of
+            // sequentially — the round-trip latency dominates, so this cuts fetch time roughly
+            // to a single request's.
+            var tasks = ExchangeTypes.Select(type => FetchTypeAsync(config.LeagueName, type, ct)).ToList();
+            var results = await Task.WhenAll(tasks);
             var dict = new Dictionary<string, PriceEntry>();
-            foreach (var type in ExchangeTypes)
-            {
-                var entries = await FetchTypeAsync(config.LeagueName, type, ct);
+            foreach (var entries in results)
                 foreach (var (name, entry) in entries)
                     dict[name] = entry;
-            }
             ApplyCustomOverride(dict, config.CustomPricesPath);
-            _prices = new ReadOnlyDictionary<string, PriceEntry>(dict);
+            var keysByLength = dict.Keys.GroupBy(k => k.Length).ToDictionary(g => g.Key, g => g.ToList());
+            // Publish both atomically in a single volatile write so the scan loop never sees
+            // a new Prices with a stale KeysByLength (or vice versa).
+            _snapshot = new PriceSnapshot(
+                new ReadOnlyDictionary<string, PriceEntry>(dict),
+                keysByLength);
+            Interlocked.Increment(ref _priceGeneration);
             LastFetchedAt = DateTime.Now;
             PricesUpdated?.Invoke();
         }
@@ -88,7 +111,7 @@ internal sealed class PriceRepository : IDisposable
         req.Headers.TryAddWithoutValidation("Referer",
             $"https://poe.ninja/poe2/economy/{slug}/{typeSlug}");
 
-        var resp = await _http.SendAsync(req, ct);
+        using var resp = await _http.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode)
         {
             Console.Error.WriteLine($"[PriceRepository] {type}: HTTP {(int)resp.StatusCode}");
@@ -140,7 +163,7 @@ internal sealed class PriceRepository : IDisposable
                 var primaryValue = line["primaryValue"]?.Value<decimal>() ?? 0m;
                 var divineValue = primaryValue * divinePerPrimary;
                 var exaltedValue = Math.Round(primaryValue * exaltedPerPrimary, 1);
-                var key = NormalizeName(name);
+                var key = NameNormalizer.Normalize(name);
                 if (!string.IsNullOrEmpty(key))
                     result[key] = new PriceEntry(divineValue, exaltedValue);
             }
@@ -165,7 +188,7 @@ internal sealed class PriceRepository : IDisposable
             if (overrides is null) return;
             foreach (var (rawKey, entry) in overrides)
             {
-                var key = NormalizeName(rawKey);
+                var key = NameNormalizer.Normalize(rawKey);
                 if (!string.IsNullOrEmpty(key))
                     dict[key] = new PriceEntry(entry.DivineValue, entry.ExaltedValue);
             }
@@ -174,14 +197,6 @@ internal sealed class PriceRepository : IDisposable
         {
             Console.Error.WriteLine($"[PriceRepository] custom override failed: {ex.Message}");
         }
-    }
-
-    internal static string NormalizeName(string name)
-    {
-        var s = name.ToLowerInvariant();
-        s = Regex.Replace(s, @"[^\w\s]", " ");
-        s = Regex.Replace(s, @"\s+", " ");
-        return s.Trim();
     }
 
     public void Dispose()

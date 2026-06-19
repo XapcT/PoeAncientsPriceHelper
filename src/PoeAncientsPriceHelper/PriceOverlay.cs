@@ -25,6 +25,11 @@ internal sealed class PriceOverlayForm : Form
     private bool _panelOpen;
     private bool _reading;  // panel detected, prices not yet resolved → show a "reading…" hint
     private bool _debug;   // F3 toggles the diagnostic boxes/region/"?" text; prices show regardless
+    // Snapshot of the last rendered state — UpdateState is called ~10x/s by the scan loop, so we skip
+    // the (relatively expensive) RenderLayered pass when nothing actually changed.
+    private IReadOnlyList<PriceRow> _lastRenderedRows = [];
+    private bool _lastPanelOpen;
+    private bool _lastReading;
     private readonly IconCache _icons;
     private readonly Rectangle _regionRect;
     private readonly int _xOffset;
@@ -32,6 +37,9 @@ internal sealed class PriceOverlayForm : Form
     private readonly Font _debugFont = new("Consolas", 18, FontStyle.Regular);
     private const int IconSize = 38;
     private const int RowHalfHeight = 25;
+    // Cached render buffer (monitor-sized ARGB bitmap). Reused across renders to avoid allocating
+    // ~8 MB per frame; recreated only when the bounds change.
+    private Bitmap? _renderBuffer;
 
     public PriceOverlayForm(Rectangle screenBounds, Rectangle regionRect, int xOffset, IconCache icons)
     {
@@ -67,8 +75,22 @@ internal sealed class PriceOverlayForm : Form
         _rows = rows;
         _panelOpen = panelOpen;
         _reading = reading;
-        ApplyVisibility();
-        if (Visible) RenderLayered();
+
+        // ApplyVisibility must run on every visibility transition (show/hide) even if the rows are
+        // unchanged; RenderLayered only needs to run when something the user can see actually changed.
+        bool shouldShow = _panelOpen || _reading || _debug;
+        bool visibilityChanged = shouldShow != Visible;
+        bool rowsChanged = !_rows.SequenceEqual(_lastRenderedRows);
+        bool stateChanged = _panelOpen != _lastPanelOpen || _reading != _lastReading;
+
+        if (visibilityChanged || rowsChanged || stateChanged)
+        {
+            ApplyVisibility(shouldShow);
+            if (Visible) RenderLayered();
+            _lastRenderedRows = _rows.ToArray();  // snapshot to avoid aliasing the scan loop's buffer
+            _lastPanelOpen = _panelOpen;
+            _lastReading = _reading;
+        }
     }
 
     // F3 toggles debug visuals (row boxes, region outline, OCR "?" text). Prices are unaffected.
@@ -77,14 +99,13 @@ internal sealed class PriceOverlayForm : Form
         if (IsDisposed) return;
         if (InvokeRequired) { BeginInvoke(ToggleDebug); return; }
         _debug = !_debug;
-        ApplyVisibility();
+        _lastRenderedRows = [];   // invalidate cache so the next UpdateState forces a fresh render
+        ApplyVisibility(_panelOpen || _reading || _debug);
         if (Visible) RenderLayered();
     }
 
-    private void ApplyVisibility()
+    private void ApplyVisibility(bool shouldShow)
     {
-        // Visible when prices are ready, while reading (to show the hint), or in debug mode.
-        bool shouldShow = _panelOpen || _reading || _debug;
         if (shouldShow && !Visible) { Show(); ForceTopmost(); }
         // Clear the rows as we hide so a later re-show can't briefly repaint the previous encounter's
         // prices before the scan loop pushes fresh state (#5).
@@ -100,7 +121,11 @@ internal sealed class PriceOverlayForm : Form
         _panelOpen = false;
         _reading = false;
         _rows = [];   // drop stale prices immediately so debug-mode (still visible) can't repaint them
-        ApplyVisibility();
+        // Reset the cached state so the next UpdateState forces a render instead of being skipped.
+        _lastPanelOpen = false;
+        _lastReading = false;
+        _lastRenderedRows = [];
+        ApplyVisibility(_debug);
         if (Visible) RenderLayered();
     }
 
@@ -118,9 +143,15 @@ internal sealed class PriceOverlayForm : Form
         int w = Bounds.Width, h = Bounds.Height;
         if (w <= 0 || h <= 0) return;
 
-        using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        if (_renderBuffer is null || _renderBuffer.Width != w || _renderBuffer.Height != h)
+        {
+            _renderBuffer?.Dispose();
+            _renderBuffer = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        }
+        var bmp = _renderBuffer;
         using (var g = Graphics.FromImage(bmp))
         {
+            g.Clear(Color.FromArgb(0));
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit; // grayscale AA carries alpha cleanly
             PaintScene(g);
@@ -128,10 +159,12 @@ internal sealed class PriceOverlayForm : Form
 
         IntPtr screenDc = GetDC(IntPtr.Zero);
         IntPtr memDc = CreateCompatibleDC(screenDc);
-        IntPtr hBitmap = bmp.GetHbitmap(Color.FromArgb(0));
-        IntPtr oldBitmap = SelectObject(memDc, hBitmap);
+        IntPtr hBitmap = IntPtr.Zero;
+        IntPtr oldBitmap = IntPtr.Zero;
         try
         {
+            hBitmap = bmp.GetHbitmap(Color.FromArgb(0));
+            oldBitmap = SelectObject(memDc, hBitmap);
             var size = new SIZE { cx = w, cy = h };
             var src = new POINT { x = 0, y = 0 };
             var dst = new POINT { x = Bounds.Left, y = Bounds.Top };
@@ -143,10 +176,10 @@ internal sealed class PriceOverlayForm : Form
         }
         finally
         {
-            SelectObject(memDc, oldBitmap);
-            DeleteObject(hBitmap);
-            DeleteDC(memDc);
-            ReleaseDC(IntPtr.Zero, screenDc);
+            if (oldBitmap != IntPtr.Zero) SelectObject(memDc, oldBitmap);
+            if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+            if (memDc != IntPtr.Zero) DeleteDC(memDc);
+            if (screenDc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDc);
         }
     }
 
@@ -230,7 +263,8 @@ internal sealed class PriceOverlayForm : Form
         // Easter eggs: a special icon + caption instead of a real price.
         if (row.Meme == MemeKind.Mirror)
         {
-            DrawBackdrop(g, x, screenY, IconSize + 2 + TextWidth(g, "5 Mirrors"));
+            int w = (int)Math.Ceiling(g.MeasureString("5 Mirrors", _priceFont).Width);
+            DrawBackdrop(g, x, screenY, IconSize + 2 + w);
             DrawIcon(g, _icons.Mirror, "M", x, screenY - IconSize / 2);
             using var memeBrush = new SolidBrush(Color.FromArgb(180, 230, 255)); // mirror-silver
             g.DrawString("5 Mirrors", _priceFont, memeBrush, x + IconSize + 2, screenY - _priceFont.Height / 2);
@@ -240,7 +274,8 @@ internal sealed class PriceOverlayForm : Form
         {
             // Headhunter's belt art is 2:1, so draw it double-wide and push the caption past it.
             const int hhWidth = IconSize * 2;
-            DrawBackdrop(g, x, screenY, hhWidth + 2 + TextWidth(g, "Headhunter!"));
+            int w = (int)Math.Ceiling(g.MeasureString("Headhunter!", _priceFont).Width);
+            DrawBackdrop(g, x, screenY, hhWidth + 2 + w);
             if (_icons.Headhunter is { } hh && _icons.IsAvailable)
                 g.DrawImage(hh, new Rectangle(x, screenY - IconSize / 2, hhWidth, IconSize));
             using var hhBrush = new SolidBrush(Color.FromArgb(223, 142, 60)); // unique-item gold
@@ -265,7 +300,7 @@ internal sealed class PriceOverlayForm : Form
             ? $"{total.ToString(fmt, inv)} ({unit.ToString(fmt, inv)} each)"
             : total.ToString(fmt, inv);
 
-        DrawBackdrop(g, x, screenY, IconSize + 2 + TextWidth(g, label));
+        DrawBackdrop(g, x, screenY, IconSize + 2 + (int)Math.Ceiling(g.MeasureString(label, _priceFont).Width));
         DrawIcon(g, useDivine ? _icons.Divine : _icons.Exalted, useDivine ? "d" : "ex", x, iconY);
 
         // Most valuable row → bright green; otherwise gold (divine) / white (exalted).
@@ -275,8 +310,6 @@ internal sealed class PriceOverlayForm : Form
         int textY = screenY - _priceFont.Height / 2;
         g.DrawString(label, _priceFont, brush, x + IconSize + 2, textY);
     }
-
-    private int TextWidth(Graphics g, string s) => (int)Math.Ceiling(g.MeasureString(s, _priceFont).Width);
 
     // A rounded, semi-transparent slate plate behind the icon + price so they read clearly over busy
     // art — the game shows faintly through it (see RenderLayered for the per-pixel-alpha window).
@@ -333,7 +366,7 @@ internal sealed class PriceOverlayForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _priceFont.Dispose(); _debugFont.Dispose(); }
+        if (disposing) { _priceFont.Dispose(); _debugFont.Dispose(); _renderBuffer?.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -378,7 +411,11 @@ internal static class PriceOverlayManager
             if (_form is not null && !_form.IsDisposed)
             {
                 var existing = _form;
-                existing.Invoke(() => { if (!existing.IsDisposed && !existing.Visible) existing.Show(); });
+                // The form can be disposed between the IsDisposed check and the Invoke (the UI thread
+                // may close it at any time); swallow those races rather than crashing the caller.
+                try { existing.Invoke(() => { if (!existing.IsDisposed && !existing.Visible) existing.Show(); }); }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
                 return;
             }
 
@@ -401,37 +438,27 @@ internal static class PriceOverlayManager
         }
     }
 
-    public static void Hide()
+    // Capture the form reference under the lock, then release it before calling into WinForms.
+    // Holding _lock across cross-thread UI dispatch can deadlock during teardown.
+    private static void WithForm(Action<PriceOverlayForm> action)
     {
-        lock (_lock)
-        {
-            var f = _form;
-            if (f is null || f.IsDisposed) return;
-            f.Invoke(() => { if (!f.IsDisposed) f.Close(); });
-        }
+        PriceOverlayForm? f;
+        lock (_lock) { f = _form; }
+        if (f is null || f.IsDisposed) return;
+        try { action(f); }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
     }
 
-    public static void UpdateState(IReadOnlyList<PriceRow> rows, bool panelOpen, bool reading)
-    {
-        var f = _form;
-        if (f is not null && !f.IsDisposed) f.UpdateState(rows, panelOpen, reading);
-    }
+    public static void Hide() =>
+        WithForm(f => f.Invoke(() => { if (!f.IsDisposed) f.Close(); }));
 
-    public static void ForceTopmost()
-    {
-        var f = _form;
-        if (f is not null && !f.IsDisposed) f.ForceTopmost();
-    }
+    public static void UpdateState(IReadOnlyList<PriceRow> rows, bool panelOpen, bool reading) =>
+        WithForm(f => f.UpdateState(rows, panelOpen, reading));
 
-    public static void ToggleDebug()
-    {
-        var f = _form;
-        if (f is not null && !f.IsDisposed) f.ToggleDebug();
-    }
+    public static void ForceTopmost() => WithForm(f => f.ForceTopmost());
 
-    public static void HideNow()
-    {
-        var f = _form;
-        if (f is not null && !f.IsDisposed) f.HideNow();
-    }
+    public static void ToggleDebug() => WithForm(f => f.ToggleDebug());
+
+    public static void HideNow() => WithForm(f => f.HideNow());
 }
