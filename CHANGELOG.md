@@ -56,10 +56,19 @@ captures frames via the GPU, and detects items instantly with the native Windows
   permanently falls back to GDI if initialization fails (no retry storm).
 - **Stale overlay clearing** — the overlay automatically hides stale prices during loading screens.
 
+### Fixed
+
+- **Freeze when calibrating via the hotkey (#14)** — triggering calibration with the global hotkey
+  while the game (or any other app) held the foreground left the calibration overlay stuck behind it
+  with no way to confirm/cancel, blocking the UI thread indefinitely. The overlay now forcibly takes
+  the foreground when shown (`AttachThreadInput` + `SetForegroundWindow`).
+- **Per-Monitor-V2 DPI awareness kept in `app.manifest`** — DPI awareness must be declared in the
+  manifest for this WPF-first app; the `<ApplicationHighDpiMode>` project property is a no-op here
+  and would have regressed the mixed-DPI multi-monitor fix from #8.
+
 ### Code quality (YAGNI)
 
-- Removed dead code: `ScreenCapture.cs`, `IsAllBlack`, `ReferencePixelColor`, `MemeKind` easter
-  eggs (Mirror of Kalandra / Headhunter icons and detection).
+- Removed dead code: `ScreenCapture.cs`, `IsAllBlack`, `ReferencePixelColor`.
 - Unified duplicate `NormalizeName` into a single `NameNormalizer` helper.
 - Simplified `ListDetector` to return only the sampled color (threshold logic lives in `ScanEngine`).
 - Extracted `WithForm(...)` helper in `PriceOverlayManager` to eliminate 5× duplicated lock+try/catch.

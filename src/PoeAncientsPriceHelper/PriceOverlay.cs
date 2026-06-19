@@ -12,8 +12,12 @@ namespace PoeAncientsPriceHelper;
 // Name is the normalized item name (used to confirm/lock a row across OCR passes).
 // ExactMatch = the name matched a price key exactly (not via prefix/fuzzy) — high confidence,
 // so it can lock on the first read instead of needing a second confirming read.
+// Meme: easter-egg rows that show a special icon + caption instead of a real price.
+//   Mirror     — OCR'd "5x random currency" → Mirror of Kalandra icon + "5 Mirrors" (always ranks top).
+//   Headhunter — OCR'd "unique belt"        → Headhunter icon + "Headhunter!".
+internal enum MemeKind { None, Mirror, Headhunter }
 
-internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false);
+internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false, MemeKind Meme = MemeKind.None);
 
 internal sealed class PriceOverlayForm : Form
 {
@@ -212,7 +216,14 @@ internal sealed class PriceOverlayForm : Form
         {
             if (!row.HasPrice) continue;
             pricedCount++;
-            decimal value = row.DivineValue * Math.Max(1, row.Multiplier);
+            // Meme rows outrank real prices: the mirror ("most expensive currency in the game")
+            // always takes the crown, with Headhunter just below it — both above any real value.
+            decimal value = row.Meme switch
+            {
+                MemeKind.Mirror => decimal.MaxValue,
+                MemeKind.Headhunter => decimal.MaxValue - 1m,
+                _ => row.DivineValue * Math.Max(1, row.Multiplier),
+            };
             if (value > topValue) { topValue = value; topRow = row; }
         }
 
@@ -249,6 +260,29 @@ internal sealed class PriceOverlayForm : Form
 
     private void DrawPrice(Graphics g, PriceRow row, int x, int screenY, bool highlightTop)
     {
+        // Easter eggs: a special icon + caption instead of a real price.
+        if (row.Meme == MemeKind.Mirror)
+        {
+            int w = (int)Math.Ceiling(g.MeasureString("5 Mirrors", _priceFont).Width);
+            DrawBackdrop(g, x, screenY, IconSize + 2 + w);
+            DrawIcon(g, _icons.Mirror, "M", x, screenY - IconSize / 2);
+            using var memeBrush = new SolidBrush(Color.FromArgb(180, 230, 255)); // mirror-silver
+            g.DrawString("5 Mirrors", _priceFont, memeBrush, x + IconSize + 2, screenY - _priceFont.Height / 2);
+            return;
+        }
+        if (row.Meme == MemeKind.Headhunter)
+        {
+            // Headhunter's belt art is 2:1, so draw it double-wide and push the caption past it.
+            const int hhWidth = IconSize * 2;
+            int w = (int)Math.Ceiling(g.MeasureString("Headhunter!", _priceFont).Width);
+            DrawBackdrop(g, x, screenY, hhWidth + 2 + w);
+            if (_icons.Headhunter is { } hh && _icons.IsAvailable)
+                g.DrawImage(hh, new Rectangle(x, screenY - IconSize / 2, hhWidth, IconSize));
+            using var hhBrush = new SolidBrush(Color.FromArgb(223, 142, 60)); // unique-item gold
+            g.DrawString("Headhunter!", _priceFont, hhBrush, x + hhWidth + 2, screenY - _priceFont.Height / 2);
+            return;
+        }
+
         int iconY = screenY - IconSize / 2;
         int mult = Math.Max(1, row.Multiplier);
         // Currency choice is per-unit so single-item display is unchanged.

@@ -7,10 +7,12 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>true</UseWPF>
-    <!-- Per-Monitor-V2 DPI awareness for both WPF (settings window) and WinForms (overlay).
-         Set as a project property so the runtime applies it before any framework code runs,
-         replacing the old app.manifest DPI declaration (WFO0003). -->
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Per-Monitor-V2 DPI awareness is declared in app.manifest (process-level), NOT via
+         <ApplicationHighDpiMode>: this is a WPF-first app that never calls
+         ApplicationConfiguration.Initialize(), so the WinForms project property is a no-op and
+         would silently regress issue #8. WFO0003 nudges toward the property — suppress it because
+         the manifest is the only thing that actually applies DPI awareness here. See app.manifest. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
     <RootNamespace>PoeAncientsPriceHelper</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>

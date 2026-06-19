@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace PoeAncientsPriceHelper;
@@ -52,6 +53,47 @@ internal sealed class CalibrationOverlay : Form
         if (disposing) _screenSnapshot.Dispose();
         base.Dispose(disposing);
     }
+
+    // Force this overlay to the foreground as soon as it's shown (issue #14).
+    //
+    // The calibrate hotkey is a GLOBAL hook: when it fires, the foreground window belongs to the game
+    // (or whatever the user is in), so OUR process is in the background. A background process can't
+    // simply SetForegroundWindow — Windows' foreground lock just flashes the taskbar — so without this
+    // the overlay opens BEHIND the game, the user can never press ENTER/ESC to close it, and
+    // RunOnStaThread's thread.Join() blocks the WPF UI thread forever → the whole app freezes and has
+    // to be killed from Task Manager. (The Start/Stop *button* path doesn't hit this because the WPF
+    // window already owns the foreground when it's clicked, which is why the button "works".)
+    //
+    // Attaching our input queue to the current foreground thread lifts the foreground lock just long
+    // enough to legitimately take focus.
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        TopMost = true;
+
+        IntPtr foreground = GetForegroundWindow();
+        uint foreThread = GetWindowThreadProcessId(foreground, out _);
+        uint thisThread = GetCurrentThreadId();
+        bool attached = foreThread != 0 && foreThread != thisThread &&
+                        AttachThreadInput(foreThread, thisThread, true);
+        try
+        {
+            Activate();
+            BringToFront();
+            SetForegroundWindow(Handle);
+            Focus();
+        }
+        finally
+        {
+            if (attached) AttachThreadInput(foreThread, thisThread, false);
+        }
+    }
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
 
     protected override void OnMouseDown(MouseEventArgs e)
     {

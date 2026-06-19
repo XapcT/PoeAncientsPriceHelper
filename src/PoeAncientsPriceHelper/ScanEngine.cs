@@ -339,6 +339,21 @@ internal sealed class ScanEngine : IDisposable
                 continue;
             }
 
+            // Easter eggs: certain OCR'd names render as a gag icon + caption instead of a price.
+            // ExactMatch=true so they lock on the first read like a real priced row.
+            //   "5x random currency" (the "5x" is stripped into the multiplier, leaving "random
+            //    currency") → Mirror of Kalandra. "unique belt" → Headhunter.
+            if (row.NormalizedName.Contains("random") && row.NormalizedName.Contains("currency"))
+            {
+                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "random currency", true, MemeKind.Mirror));
+                continue;
+            }
+            if (row.NormalizedName.Contains("unique") && row.NormalizedName.Contains("belt"))
+            {
+                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "unique belt", true, MemeKind.Headhunter));
+                continue;
+            }
+
             // Resolve the OCR'd name to a price key: exact → prefix → fuzzy (edit distance).
             // The fuzzy step rescues single-character misreads ("viswn" → "vision"). The matched
             // key (not the noisy OCR text) is stored as the row Name so the same item locks even
