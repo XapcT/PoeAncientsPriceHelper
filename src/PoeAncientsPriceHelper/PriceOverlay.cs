@@ -33,6 +33,9 @@ internal sealed class PriceOverlayForm : Form
     private readonly Font _debugFont = new("Consolas", 18, FontStyle.Regular);
     private const int IconSize = 38;
     private const int RowHalfHeight = 25;
+    // Cached render buffer (monitor-sized ARGB bitmap). Reused across renders to avoid allocating
+    // ~8 MB per frame; recreated only when the bounds change.
+    private Bitmap? _renderBuffer;
 
     public PriceOverlayForm(Rectangle screenBounds, Rectangle regionRect, int xOffset, IconCache icons)
     {
@@ -71,23 +74,20 @@ internal sealed class PriceOverlayForm : Form
 
         // ApplyVisibility must run on every visibility transition (show/hide) even if the rows are
         // unchanged; RenderLayered only needs to run when something the user can see actually changed.
-        bool visibilityChanged = (_panelOpen || _reading || _debug) != Visible;
-        bool rowsChanged = !RowsEqual(_rows, _lastRenderedRows);
+        bool shouldShow = _panelOpen || _reading || _debug;
+        bool visibilityChanged = shouldShow != Visible;
+        bool rowsChanged = !_rows.SequenceEqual(_lastRenderedRows);
         bool stateChanged = _panelOpen != _lastPanelOpen || _reading != _lastReading;
 
         if (visibilityChanged || rowsChanged || stateChanged)
         {
-            ApplyVisibility();
+            ApplyVisibility(shouldShow);
             if (Visible) RenderLayered();
             _lastRenderedRows = _rows.ToArray();  // snapshot to avoid aliasing the scan loop's buffer
             _lastPanelOpen = _panelOpen;
             _lastReading = _reading;
         }
     }
-
-    // PriceRow is a record, so SequenceEqual gives structural (value) equality across all fields.
-    private static bool RowsEqual(IReadOnlyList<PriceRow> a, IReadOnlyList<PriceRow> b)
-        => a.SequenceEqual(b);
 
     // F3 toggles debug visuals (row boxes, region outline, OCR "?" text). Prices are unaffected.
     public void ToggleDebug()
@@ -96,14 +96,12 @@ internal sealed class PriceOverlayForm : Form
         if (InvokeRequired) { BeginInvoke(ToggleDebug); return; }
         _debug = !_debug;
         _lastRenderedRows = [];   // invalidate cache so the next UpdateState forces a fresh render
-        ApplyVisibility();
+        ApplyVisibility(_panelOpen || _reading || _debug);
         if (Visible) RenderLayered();
     }
 
-    private void ApplyVisibility()
+    private void ApplyVisibility(bool shouldShow)
     {
-        // Visible when prices are ready, while reading (to show the hint), or in debug mode.
-        bool shouldShow = _panelOpen || _reading || _debug;
         if (shouldShow && !Visible) { Show(); ForceTopmost(); }
         // Clear the rows as we hide so a later re-show can't briefly repaint the previous encounter's
         // prices before the scan loop pushes fresh state (#5).
@@ -123,7 +121,7 @@ internal sealed class PriceOverlayForm : Form
         _lastPanelOpen = false;
         _lastReading = false;
         _lastRenderedRows = [];
-        ApplyVisibility();
+        ApplyVisibility(_debug);
         if (Visible) RenderLayered();
     }
 
@@ -141,9 +139,15 @@ internal sealed class PriceOverlayForm : Form
         int w = Bounds.Width, h = Bounds.Height;
         if (w <= 0 || h <= 0) return;
 
-        using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        if (_renderBuffer is null || _renderBuffer.Width != w || _renderBuffer.Height != h)
+        {
+            _renderBuffer?.Dispose();
+            _renderBuffer = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+        }
+        var bmp = _renderBuffer;
         using (var g = Graphics.FromImage(bmp))
         {
+            g.Clear(Color.FromArgb(0));
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit; // grayscale AA carries alpha cleanly
             PaintScene(g);
@@ -151,10 +155,12 @@ internal sealed class PriceOverlayForm : Form
 
         IntPtr screenDc = GetDC(IntPtr.Zero);
         IntPtr memDc = CreateCompatibleDC(screenDc);
-        IntPtr hBitmap = bmp.GetHbitmap(Color.FromArgb(0));
-        IntPtr oldBitmap = SelectObject(memDc, hBitmap);
+        IntPtr hBitmap = IntPtr.Zero;
+        IntPtr oldBitmap = IntPtr.Zero;
         try
         {
+            hBitmap = bmp.GetHbitmap(Color.FromArgb(0));
+            oldBitmap = SelectObject(memDc, hBitmap);
             var size = new SIZE { cx = w, cy = h };
             var src = new POINT { x = 0, y = 0 };
             var dst = new POINT { x = Bounds.Left, y = Bounds.Top };
@@ -166,10 +172,10 @@ internal sealed class PriceOverlayForm : Form
         }
         finally
         {
-            SelectObject(memDc, oldBitmap);
-            DeleteObject(hBitmap);
-            DeleteDC(memDc);
-            ReleaseDC(IntPtr.Zero, screenDc);
+            if (oldBitmap != IntPtr.Zero) SelectObject(memDc, oldBitmap);
+            if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+            if (memDc != IntPtr.Zero) DeleteDC(memDc);
+            if (screenDc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDc);
         }
     }
 
@@ -260,7 +266,7 @@ internal sealed class PriceOverlayForm : Form
             ? $"{total.ToString(fmt, inv)} ({unit.ToString(fmt, inv)} each)"
             : total.ToString(fmt, inv);
 
-        DrawBackdrop(g, x, screenY, IconSize + 2 + TextWidth(g, label));
+        DrawBackdrop(g, x, screenY, IconSize + 2 + (int)Math.Ceiling(g.MeasureString(label, _priceFont).Width));
         DrawIcon(g, useDivine ? _icons.Divine : _icons.Exalted, useDivine ? "d" : "ex", x, iconY);
 
         // Most valuable row → bright green; otherwise gold (divine) / white (exalted).
@@ -270,8 +276,6 @@ internal sealed class PriceOverlayForm : Form
         int textY = screenY - _priceFont.Height / 2;
         g.DrawString(label, _priceFont, brush, x + IconSize + 2, textY);
     }
-
-    private int TextWidth(Graphics g, string s) => (int)Math.Ceiling(g.MeasureString(s, _priceFont).Width);
 
     // A rounded, semi-transparent slate plate behind the icon + price so they read clearly over busy
     // art — the game shows faintly through it (see RenderLayered for the per-pixel-alpha window).
@@ -328,7 +332,7 @@ internal sealed class PriceOverlayForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _priceFont.Dispose(); _debugFont.Dispose(); }
+        if (disposing) { _priceFont.Dispose(); _debugFont.Dispose(); _renderBuffer?.Dispose(); }
         base.Dispose(disposing);
     }
 

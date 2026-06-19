@@ -12,14 +12,14 @@ internal sealed class ScanEngine : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
     private Dictionary<string, int> _lastPositions = new();
-    private string _logPath = "";
+    private string _logPath = null!;   // assigned in RunLoopAsync before any Log() call
 
     // Resolution cache for the exact → prefix → fuzzy chain in BuildPriceRows. The same OCR'd
     // names recur on every pass while a panel is open, so caching the resolved price key (or a
     // recorded miss) skips the dictionary scan + Levenshtein work on all but the first pass.
     // Invalidated wholesale when the price snapshot changes (tracked via PriceGeneration).
     private int _cachedPriceGeneration = -1;
-    private readonly Dictionary<string, string?> _resolutionCache = new();
+    private readonly Dictionary<string, (string? Key, bool Exact)> _resolutionCache = new();
 
     // Shared with the global hotkey hook (App). The loop owns the detection state, so the hook
     // only sets a "dismissed" latch; the loop reads it and keeps the overlay hidden.
@@ -47,16 +47,18 @@ internal sealed class ScanEngine : IDisposable
     public void Start()
     {
         if (IsRunning) return;
+        // Reset shared static flags so a stale loop (e.g. one that timed out in StopAndWait)
+        // can't clobber the new instance's dismiss/show state.
+        _dismissed = false;
+        _showing = false;
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
         _loopTask = Task.Run(() => RunLoopAsync(_cts.Token));
     }
 
-    public void Stop() => _cts?.Cancel();
-
     public void StopAndWait(TimeSpan timeout)
     {
-        Stop();
+        _cts?.Cancel();
         try { _loopTask?.Wait(timeout); } catch { }
     }
 
@@ -78,16 +80,9 @@ internal sealed class ScanEngine : IDisposable
         if (App.DebugMode)
             File.WriteAllText(_logPath, "");
 
-        var tessdataDir = Path.Combine(AppContext.BaseDirectory, "tessdata");
-        if (!Directory.Exists(tessdataDir))
-        {
-            Log($"ERROR tessdata not found at {tessdataDir}");
-            return;
-        }
-
         Log($"START prices={_prices.ItemCount} icons={_icons.IsAvailable} region={_config.RegionRect}");
 
-        using var scanner = new OcrScanner(tessdataDir, Log, App.DebugMode);
+        var scanner = new OcrScanner(Log, App.DebugMode);
         var detector = new ListDetector();
         var sw = Stopwatch.StartNew();
         var slots = new List<RowSlot>();             // per-row accumulator: priced rows lock, misses keep retrying
@@ -111,13 +106,13 @@ internal sealed class ScanEngine : IDisposable
         int brightStreak = 0;
         int darkStreak = 0;
         int dismissDark = 0;          // dark frames seen while dismissed — releases the latch when the panel closes
-        int staleCount = 0;           // consecutive OCR passes with no priced rows — clears stale overlay on loading screens
-        const int StaleLimit = 5;     // consecutive stale passes before clearing (~400ms at 80ms interval)
+        int staleCount = 0;           // consecutive 0-row OCR passes — clears stale overlay on loading screens
+        const int StaleLimit = 10;    // consecutive 0-row OCR passes before clearing (~800ms at 80ms interval)
         int cycleCount = 0;
         var lastOcrAt = DateTime.MinValue;
-        const int MinOcrIntervalMs = 80;             // OCR floor while panel is open — fast price turnaround
-        const int OpenCycleMs = 100;                 // tight loop while scanning
-        const int ClosedCycleMs = 150;               // polling while watching for the panel — snappy detection
+        const int MinOcrIntervalMs = 150;            // OCR floor while panel is open — Windows OCR is fast enough that 6.7/s gives sub-200ms turnaround
+        const int OpenCycleMs = 120;                 // tight loop while scanning
+        const int ClosedCycleMs = 300;               // polling while watching for the panel — halves idle capture cost
         const int DarkToRelease = 3;                 // dark frames before a dismiss latch releases
         // Asymmetric brightness hysteresis. A frame counts toward OPENING only above OpenBrightness and
         // toward CLOSING only below CloseBrightness; readings in the [80,100] dead zone hold the current
@@ -211,59 +206,41 @@ internal sealed class ScanEngine : IDisposable
                             if (ocrRows.Count == 0)
                             {
                                 staleCount++;
+                                // Hide stale prices quickly (after 2 passes ≈ 160ms) so they don't
+                                // linger on loading screens, but keep slots alive until StaleLimit
+                                // for fast recovery when the panel reappears.
+                                if (staleCount >= 2)
+                                    lastRows = [];
                                 if (staleCount >= StaleLimit)
                                 {
-                                    // Sustained 0-row reads — the panel is gone (loading screen, scene
-                                    // change). Clear everything so stale prices don't linger on screen.
-                                    Log($"OCR 0 rows for {staleCount} passes — clearing stale overlay");
+                                    Log($"OCR 0 rows for {staleCount} passes — clearing slots");
                                     slots.Clear();
-                                    lastRows = [];
                                     confirmedOpen = false;
                                 }
                                 else
                                 {
-                                    // Brief animation frame — don't disturb locked rows yet.
-                                    Log($"OCR returned 0 rows ({staleCount}/{StaleLimit})");
+                                    Log($"OCR 0 rows ({staleCount}/{StaleLimit})");
                                 }
                             }
                             else
                             {
+                                staleCount = 0;
                                 var reads = BuildPriceRows(ocrRows);
                                 Log($"OCR {ocrRows.Count} rows → " +
                                     string.Join(" | ", reads.Select(r =>
                                         $"raw='{r.OcrText.Trim()}' y={r.CenterY} " +
                                         $"{(r.HasPrice ? $"HIT→'{r.Name}'" : "MISS")}")));
 
-                                if (reads.Any(r => r.HasPrice))
+                                // Confirm a real exchange panel only when OCR resolves an actual
+                                // priced item — combat effects / stray windows never do.
+                                if (!confirmedOpen && reads.Any(r => r.HasPrice))
                                 {
-                                    staleCount = 0;
-                                    // Confirm a real exchange panel only when OCR resolves an actual
-                                    // priced item — combat effects / stray windows never do.
-                                    if (!confirmedOpen)
-                                    {
-                                        confirmedOpen = true;
-                                        suppressHintUntilConfirm = false;   // a real panel is back — re-enable the hint
-                                        Log("panel CONFIRMED (priced row found)");
-                                    }
-                                }
-                                else
-                                {
-                                    // OCR found text rows but none matched a price. Track this — if it
-                                    // persists, the panel content is gone (loading screen tips, combat
-                                    // effects, etc.) and stale locked prices should be cleared.
-                                    staleCount++;
-                                    if (staleCount >= StaleLimit)
-                                    {
-                                        Log($"No priced rows for {staleCount} passes — clearing stale overlay");
-                                        slots.Clear();
-                                        lastRows = [];
-                                        confirmedOpen = false;
-                                    }
+                                    confirmedOpen = true;
+                                    suppressHintUntilConfirm = false;
+                                    Log("panel CONFIRMED (priced row found)");
                                 }
 
-                                // Only merge reads into slots if we haven't just cleared them.
-                                if (staleCount < StaleLimit)
-                                    lastRows = MergeReads(slots, reads);
+                                lastRows = MergeReads(slots, reads);
                             }
                         }
                     }
@@ -320,7 +297,8 @@ internal sealed class ScanEngine : IDisposable
 
     private IReadOnlyList<PriceRow> BuildPriceRows(IReadOnlyList<OcrRow> ocrRows)
     {
-        var snapshot = _prices.Prices;
+        var snap = _prices.Current;
+        var snapshot = snap.Prices;
         var rows = new List<PriceRow>(ocrRows.Count);
         var newPositions = new Dictionary<string, int>(ocrRows.Count);
 
@@ -368,17 +346,18 @@ internal sealed class ScanEngine : IDisposable
             PriceEntry? entry;
             string matchedKey = row.NormalizedName;
             bool exact = false;
-            if (_resolutionCache.TryGetValue(row.NormalizedName, out var cachedKey))
+            if (_resolutionCache.TryGetValue(row.NormalizedName, out var cached))
             {
                 // Reuse a previously resolved key (or a recorded miss). The same OCR'd names recur
                 // on every pass while a panel is open, so this skips the dict scan + Levenshtein
-                // work on all but the first pass. exact is true only when the resolved key IS the
-                // OCR'd name itself (a direct dictionary hit) — prefix/fuzzy keys must stay non-exact
-                // so they still need a second confirming read before locking.
-                if (cachedKey is not null && snapshot.TryGetValue(cachedKey, out entry))
+                // work on all but the first pass. The Exact flag is preserved from the original
+                // resolution so fuzzy high-confidence matches (score ≥ 0.92) still lock in 1 read
+                // on subsequent passes — recalculating it as cachedKey == NormalizedName would
+                // wrongly degrade them to needing 2 reads.
+                if (cached.Key is not null && snapshot.TryGetValue(cached.Key, out entry))
                 {
-                    matchedKey = cachedKey;
-                    exact = cachedKey == row.NormalizedName;
+                    matchedKey = cached.Key;
+                    exact = cached.Exact;
                 }
                 else
                 {
@@ -399,7 +378,7 @@ internal sealed class ScanEngine : IDisposable
                     matchedKey = prefixKey;
                 }
                 else if (row.NormalizedName.Length >= 6 &&
-                         BestFuzzy(snapshot, _prices.KeysByLength, row.NormalizedName) is { } fuzzy &&
+                         BestFuzzy(snapshot, snap.KeysByLength, row.NormalizedName) is { } fuzzy &&
                          snapshot.TryGetValue(fuzzy.Key, out entry))
                 {
                     matchedKey = fuzzy.Key;
@@ -410,7 +389,7 @@ internal sealed class ScanEngine : IDisposable
                     entry = null;
                 }
                 // Cache the resolution: the matched key, or null to record a miss.
-                _resolutionCache[row.NormalizedName] = entry != null ? matchedKey : null;
+                _resolutionCache[row.NormalizedName] = entry != null ? (matchedKey, exact) : (null, false);
             }
 
             if (entry != null)
@@ -521,18 +500,22 @@ internal sealed class ScanEngine : IDisposable
         // Panel-switch detection: the user opened a different panel without the overlay closing.
         // Locked rows are otherwise sticky (a miss never unlocks them), so they'd keep showing the
         // previous panel's prices. If two or more locked positions now read a *different* priced
-        // item, the content changed — drop the stale locks so the new panel takes over at once.
-        int changedPositions = 0;
+        // item, the content changed — drop only the changed slots so the new panel takes over.
+        // (Previously this cleared ALL slots, which was too aggressive: OCR jitter on 2 fuzzy
+        // matches could trigger a false panel-switch and wipe all locking progress.)
+        var changedSlots = new List<RowSlot>();
         foreach (var read in reads)
         {
             if (!read.HasPrice) continue;
             var locked = slots.FirstOrDefault(s => s.Locked && Math.Abs(s.Y - read.CenterY) <= Tolerance);
-            if (locked is not null && locked.LockedRow.Name != read.Name) changedPositions++;
+            if (locked is not null && locked.LockedRow.Name != read.Name)
+                changedSlots.Add(locked);
         }
-        if (changedPositions >= 2)
+        if (changedSlots.Count >= 2)
         {
-            Log($"panel switch detected ({changedPositions} rows changed) — resetting prices");
-            slots.Clear();
+            foreach (var s in changedSlots)
+                slots.Remove(s);
+            Log($"panel switch detected ({changedSlots.Count} rows changed) — resetting changed slots only");
         }
 
         var matched = new HashSet<RowSlot>();
@@ -571,12 +554,11 @@ internal sealed class ScanEngine : IDisposable
                     slot.LockedRow = read with { CenterY = slot.Y };
                 }
             }
-            else
-            {
-                // A miss breaks a pending streak but never unlocks an already-priced row.
-                slot.PendingName = null;
-                slot.PendingCount = 0;
-            }
+            // A miss (read.HasPrice == false) does NOT reset the pending streak. A miss means
+            // OCR couldn't resolve the name this pass — it's "no information", not "different item".
+            // The streak resets only when a DIFFERENT priced name arrives (handled in the if-branch
+            // above via PendingName comparison). Resetting on misses made fuzzy/prefix items un-
+            // lockable whenever OCR alternated between a correct read and a fragmented read.
         }
 
         for (int i = slots.Count - 1; i >= 0; i--)

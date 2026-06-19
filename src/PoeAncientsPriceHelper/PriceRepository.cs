@@ -10,26 +10,31 @@ namespace PoeAncientsPriceHelper;
 // ExaltedValue = DivineValue * core.rates.exalted (computed, for display when < 1 divine)
 internal sealed record PriceEntry(decimal DivineValue, decimal ExaltedValue);
 
+// Atomic snapshot of prices + length index, published together so the scan loop can never
+// see a new _prices with a stale _keysByLength (or vice versa) during a background refresh.
+internal sealed record PriceSnapshot(
+    IReadOnlyDictionary<string, PriceEntry> Prices,
+    IReadOnlyDictionary<int, List<string>> KeysByLength);
+
 internal sealed class PriceRepository : IDisposable
 {
     private readonly HttpClient _http;
-    private volatile IReadOnlyDictionary<string, PriceEntry> _prices =
-        new ReadOnlyDictionary<string, PriceEntry>(new Dictionary<string, PriceEntry>());
-    // Length-bucketed index of the price keys, rebuilt whenever _prices changes. Lets the fuzzy
-    // matcher scan only keys within ±3 of the OCR'd name length instead of every key.
-    private volatile IReadOnlyDictionary<int, List<string>> _keysByLength =
-        new Dictionary<int, List<string>>();
+    private static readonly PriceSnapshot Empty = new(
+        new ReadOnlyDictionary<string, PriceEntry>(new Dictionary<string, PriceEntry>()),
+        new Dictionary<int, List<string>>());
+    private volatile PriceSnapshot _snapshot = Empty;
     private System.Threading.Timer? _timer;
     // Cancelled on Dispose so a fetch in flight at shutdown (or one stuck behind the HttpClient
     // timeout) is abandoned cleanly instead of running on against a disposed client.
     private readonly CancellationTokenSource _cts = new();
     private int _priceGeneration;
 
-    public IReadOnlyDictionary<string, PriceEntry> Prices => _prices;
+    public PriceSnapshot Current => _snapshot;
+    public IReadOnlyDictionary<string, PriceEntry> Prices => _snapshot.Prices;
     // Snapshot of the length-bucketed key index, for the fuzzy matcher in ScanEngine.
-    public IReadOnlyDictionary<int, List<string>> KeysByLength => _keysByLength;
+    public IReadOnlyDictionary<int, List<string>> KeysByLength => _snapshot.KeysByLength;
     public DateTime? LastFetchedAt { get; private set; }
-    public int ItemCount => _prices.Count;
+    public int ItemCount => _snapshot.Prices.Count;
     // Bumped each time _prices is replaced; ScanEngine uses it to invalidate its resolution cache.
     public int PriceGeneration => Volatile.Read(ref _priceGeneration);
 
@@ -73,10 +78,12 @@ internal sealed class PriceRepository : IDisposable
                 foreach (var (name, entry) in entries)
                     dict[name] = entry;
             ApplyCustomOverride(dict, config.CustomPricesPath);
-            _prices = new ReadOnlyDictionary<string, PriceEntry>(dict);
-            // Rebuild the length-bucketed index and bump the generation so consumers (ScanEngine's
-            // resolution cache) know the snapshot changed.
-            _keysByLength = dict.Keys.GroupBy(k => k.Length).ToDictionary(g => g.Key, g => g.ToList());
+            var keysByLength = dict.Keys.GroupBy(k => k.Length).ToDictionary(g => g.Key, g => g.ToList());
+            // Publish both atomically in a single volatile write so the scan loop never sees
+            // a new Prices with a stale KeysByLength (or vice versa).
+            _snapshot = new PriceSnapshot(
+                new ReadOnlyDictionary<string, PriceEntry>(dict),
+                keysByLength);
             Interlocked.Increment(ref _priceGeneration);
             LastFetchedAt = DateTime.Now;
             PricesUpdated?.Invoke();
