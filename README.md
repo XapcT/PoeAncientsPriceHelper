@@ -22,6 +22,12 @@ stack is worth.
 - **One-time calibration** — just drag a box around the in-game list panel.
 - **Hotkeys:** `F5` start/stop · `F4` recalibrate · `F3` debug boxes · `Esc` / `Ctrl+Click` hide.
 - **Minimize to tray** — scanning keeps running in the background.
+- **🎨 Theme switcher** — 5 dark themes (Toxic, Midnight, Obsidian, Abyss, Ember). Defaults to
+  **Toxic** — its dark green gradient complements the green Start button while keeping the same
+  low-light feel.
+- **🔤 Font selector** — 6 overlay fonts including **Fontin SmallCaps** (Path of Exile's official
+  font), Angie SmallCaps, IBM Plex Mono, Consolas, Georgia, and Palatino Linotype. Defaults to
+  **Fontin SmallCaps** for an authentic PoE look. Font changes apply live without restarting.
 
 ## Download & run
 
@@ -68,7 +74,7 @@ crashing.
 - **Windows Graphics Capture** via Vortice.Direct3D11 + WinRT interop for screen capture
 - **poe.ninja** API for live price data (parallel fetch over HTTP/2, 30-min auto-refresh)
 - **SharpHook** for global hotkeys
-- **MahApps.Metro** for the settings window UI
+- **WPF UI** (lepoco) for the settings window UI
 
 ## Support
 

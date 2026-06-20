@@ -33,19 +33,21 @@ internal sealed class PriceOverlayForm : Form
     private readonly IconCache _icons;
     private readonly Rectangle _regionRect;
     private readonly int _xOffset;
-    private readonly Font _priceFont = new("Consolas", 20, FontStyle.Bold);
-    private readonly Font _debugFont = new("Consolas", 18, FontStyle.Regular);
+    private Font _priceFont;
+    private Font _debugFont;
     private const int IconSize = 38;
     private const int RowHalfHeight = 25;
     // Cached render buffer (monitor-sized ARGB bitmap). Reused across renders to avoid allocating
     // ~8 MB per frame; recreated only when the bounds change.
     private Bitmap? _renderBuffer;
 
-    public PriceOverlayForm(Rectangle screenBounds, Rectangle regionRect, int xOffset, IconCache icons)
+    public PriceOverlayForm(Rectangle screenBounds, Rectangle regionRect, int xOffset, IconCache icons, string overlayFont = "Consolas")
     {
         _regionRect = regionRect;
         _xOffset = xOffset;
         _icons = icons;
+        _priceFont = OverlayFontLoader.CreateFont(overlayFont, 20, FontStyle.Bold);
+        _debugFont = OverlayFontLoader.CreateFont(overlayFont, 18, FontStyle.Regular);
         FormBorderStyle = FormBorderStyle.None;
         TopMost = true;
         ShowInTaskbar = false;
@@ -105,6 +107,21 @@ internal sealed class PriceOverlayForm : Form
         _debug = !_debug;
         _lastRenderedRows = [];   // invalidate cache so the next UpdateState forces a fresh render
         ApplyVisibility(_panelOpen || _reading || _debug);
+        if (Visible) RenderLayered();
+    }
+
+    // Hot-swap the overlay font without restarting the scan.
+    public void UpdateFont(string fontName)
+    {
+        if (IsDisposed) return;
+        if (InvokeRequired) { BeginInvoke(() => UpdateFont(fontName)); return; }
+        var newPrice = OverlayFontLoader.CreateFont(fontName, 20, FontStyle.Bold);
+        var newDebug = OverlayFontLoader.CreateFont(fontName, 18, FontStyle.Regular);
+        _priceFont.Dispose();
+        _debugFont.Dispose();
+        _priceFont = newPrice;
+        _debugFont = newDebug;
+        _lastRenderedRows = [];   // force re-render with new font
         if (Visible) RenderLayered();
     }
 
@@ -408,7 +425,7 @@ internal static class PriceOverlayManager
     private static Thread? _thread;
     private static readonly object _lock = new();
 
-    public static void EnsureVisible(Rectangle regionRect, int xOffset, IconCache icons)
+    public static void EnsureVisible(Rectangle regionRect, int xOffset, IconCache icons, string overlayFont = "Consolas")
     {
         lock (_lock)
         {
@@ -440,7 +457,7 @@ internal static class PriceOverlayManager
                 // one-monitor small (no perf regression) while prices land on the monitor PoE runs on.
                 // Evaluated here (not on the caller) so it's read under the PMv2 context set above.
                 var screen = Screen.FromRectangle(regionRect).Bounds;
-                var f = new PriceOverlayForm(screen, regionRect, xOffset, icons);
+                var f = new PriceOverlayForm(screen, regionRect, xOffset, icons, overlayFont);
                 f.Shown += (_, _) =>
                 {
                     // DPI diagnostics (debug-only): on the affected machine this confirms the window
@@ -482,6 +499,8 @@ internal static class PriceOverlayManager
     public static void ForceTopmost() => WithForm(f => f.ForceTopmost());
 
     public static void ToggleDebug() => WithForm(f => f.ToggleDebug());
+
+    public static void UpdateFont(string fontName) => WithForm(f => f.UpdateFont(fontName));
 
     public static void HideNow() => WithForm(f => f.HideNow());
 

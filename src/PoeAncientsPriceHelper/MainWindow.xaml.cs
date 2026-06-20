@@ -1,13 +1,40 @@
 using System.Net;
 using System.Net.Http;
 using System.Windows;
-using MahApps.Metro.Controls;
+using System.Windows.Media;
 using SharpHook.Data;
 
 namespace PoeAncientsPriceHelper;
 
-public partial class MainWindow : MetroWindow
+public partial class MainWindow : Window
 {
+    // Dark theme presets. Only the window background changes — button colors are hardcoded in
+    // FlatButton and are never affected by theme switches.
+    private static readonly (string Name, System.Windows.Media.Brush Background)[] Themes =
+    [
+        ("Midnight", CreateSolid(0x1C, 0x1C, 0x1C)),
+        ("Obsidian", CreateGradient(0x05, 0x05, 0x05, 0x14, 0x14, 0x14)),
+        ("Abyss",    CreateGradient(0x0A, 0x0F, 0x1E, 0x0D, 0x15, 0x28)),
+        ("Ember",    CreateGradient(0x1A, 0x0F, 0x08, 0x0F, 0x08, 0x05)),
+        ("Toxic",    CreateGradient(0x0A, 0x12, 0x08, 0x0D, 0x1A, 0x0A)),
+    ];
+
+    private static System.Windows.Media.Brush CreateSolid(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static System.Windows.Media.Brush CreateGradient(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2)
+    {
+        var brush = new LinearGradientBrush(
+            System.Windows.Media.Color.FromRgb(r1, g1, b1),
+            System.Windows.Media.Color.FromRgb(r2, g2, b2), 90);
+        brush.Freeze();
+        return brush;
+    }
+
     private AppConfig _config = new();
     private PriceRepository? _repo;
     private IconCache? _icons;
@@ -132,7 +159,48 @@ public partial class MainWindow : MetroWindow
         App.SetDebugKey(debug);
         App.SetCalibrateKey(calibrate);
         UpdateRegionLabel();
+        PopulateThemeBox();
+        PopulateFontBox();
         _loading = false;
+    }
+
+    private void PopulateThemeBox()
+    {
+        ThemeBox.ItemsSource = Themes.Select(t => t.Name).ToArray();
+        var saved = Themes.Any(t => t.Name == _config.Theme) ? _config.Theme : "Toxic";
+        ThemeBox.SelectedItem = saved;
+        ApplyTheme(saved);
+    }
+
+    private void ApplyTheme(string name)
+    {
+        var preset = Array.Find(Themes, t => t.Name == name);
+        if (preset.Name is null) return;
+        Resources["ApplicationBackgroundBrush"] = preset.Background;
+    }
+
+    private void ThemeBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_loading || ThemeBox.SelectedItem is not string theme) return;
+        _config.Theme = theme;
+        ConfigStore.Save(_config);
+        ApplyTheme(theme);
+    }
+
+    private void PopulateFontBox()
+    {
+        FontBox.ItemsSource = OverlayFontLoader.FontNames;
+        var saved = OverlayFontLoader.FontNames.Contains(_config.OverlayFont) ? _config.OverlayFont : "Fontin SmallCaps";
+        FontBox.SelectedItem = saved;
+    }
+
+    private void FontBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_loading || FontBox.SelectedItem is not string font) return;
+        _config.OverlayFont = font;
+        ConfigStore.Save(_config);
+        // Apply live if the overlay is running; otherwise it picks up the new font on next start.
+        PriceOverlayManager.UpdateFont(font);
     }
 
     private void UpdateRegionLabel()

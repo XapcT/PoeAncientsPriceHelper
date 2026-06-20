@@ -19,7 +19,7 @@
     <AssemblyTitle>Poe Ancients Price Helper</AssemblyTitle>
     <Product>Poe Ancients Price Helper</Product>
     <Description>Screen overlay for Path of Exile 2 that OCRs the currency-exchange panel and shows live poe.ninja prices.</Description>
-    <Version>2.0.1</Version>
+    <Version>2.1.0</Version>
     <Authors>pedro</Authors>
     <Company>pedro</Company>
     <Copyright>Copyright © 2026 pedro</Copyright>
@@ -30,11 +30,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="fonts\*.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="PoeAncientsPriceHelper.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="MahApps.Metro" Version="2.4.11" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="SharpHook" Version="7.1.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />

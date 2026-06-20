@@ -43,12 +43,11 @@ internal sealed class PriceRepository : IDisposable
     // thread-pool thread; subscribers must marshal to the UI thread.
     public event Action? PricesUpdated;
 
-    // UncutGems shares the exact same response shape as the others: a root items[] maps each
-    // line id (e.g. "uncut-spirit-gem-19") to a display name that already carries the level
-    // ("Uncut Spirit Gem (Level 19)"), which NormalizeName reduces to "uncut spirit gem level 19" —
-    // the same string the OCR produces. So no special parsing is needed; matching safety (pinning
-    // the gem type + level) lives in ScanEngine.BuildPriceRows.
-    private static readonly string[] ExchangeTypes = ["Verisium", "Runes", "Expedition", "Currency", "UncutGems"];
+    // Only the 5 exchange categories whose items actually appear as Verisium Remnant rewards.
+    // Other poe.ninja categories (Essences, SoulCores, Idols, Omens, Catalysts, etc.) belong to
+    // different game mechanics and never show up in the remnant panel — fetching them only wastes
+    // bandwidth and risks false fuzzy matches.
+    private static readonly string[] ExchangeTypes = ["Currency", "Runes", "Expedition", "Verisium", "UncutGems"];
 
     public PriceRepository(HttpClient http) => _http = http;
 
@@ -160,7 +159,12 @@ internal sealed class PriceRepository : IDisposable
             {
                 var id = line["id"]?.Value<string>();
                 if (id is null || !nameMap.TryGetValue(id, out var name)) continue;
-                var primaryValue = line["primaryValue"]?.Value<decimal>() ?? 0m;
+                // Skip items with no trading data (primaryValue is null in the API response).
+                // Previously these were added with price 0, causing the overlay to show "0 divines"
+                // for items that simply have no market data.
+                var primaryValueToken = line["primaryValue"];
+                if (primaryValueToken is null || primaryValueToken.Type == JTokenType.Null) continue;
+                var primaryValue = primaryValueToken.Value<decimal>();
                 var divineValue = primaryValue * divinePerPrimary;
                 var exaltedValue = Math.Round(primaryValue * exaltedPerPrimary, 1);
                 var key = NameNormalizer.Normalize(name);
