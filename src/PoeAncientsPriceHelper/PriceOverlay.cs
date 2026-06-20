@@ -15,7 +15,7 @@ namespace PoeAncientsPriceHelper;
 // Meme: easter-egg rows that show a special icon + caption instead of a real price.
 //   Mirror     — OCR'd "5x random currency" → Mirror of Kalandra icon + "5 Mirrors" (always ranks top).
 //   Headhunter — OCR'd "unique belt"        → Headhunter icon + "Headhunter!".
-internal enum MemeKind { None, Mirror, Headhunter }
+internal enum MemeKind { None, Mirror, Headhunter, NoInfo }
 
 internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false, MemeKind Meme = MemeKind.None);
 
@@ -235,7 +235,7 @@ internal sealed class PriceOverlayForm : Form
         decimal topValue = -1m;
         foreach (var row in _rows)
         {
-            if (!row.HasPrice) continue;
+            if (!row.HasPrice || row.Meme == MemeKind.NoInfo) continue;
             pricedCount++;
             // Meme rows outrank real prices: the mirror ("most expensive currency in the game")
             // always takes the crown, with Headhunter just below it — both above any real value.
@@ -281,6 +281,16 @@ internal sealed class PriceOverlayForm : Form
 
     private void DrawPrice(Graphics g, PriceRow row, int x, int screenY, bool highlightTop)
     {
+        // Known item with no trading data — show "no info" instead of a price.
+        if (row.Meme == MemeKind.NoInfo)
+        {
+            int w = (int)Math.Ceiling(g.MeasureString("no info", _debugFont).Width);
+            DrawBackdrop(g, x, screenY, w + 4);
+            using var grayBrush = new SolidBrush(Color.FromArgb(160, Color.Gray));
+            g.DrawString("no info", _debugFont, grayBrush, x + 2, screenY - _debugFont.Height / 2);
+            return;
+        }
+
         // Easter eggs: a special icon + caption instead of a real price.
         if (row.Meme == MemeKind.Mirror)
         {

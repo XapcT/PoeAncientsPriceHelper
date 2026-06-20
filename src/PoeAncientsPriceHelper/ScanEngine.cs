@@ -331,8 +331,13 @@ internal sealed class ScanEngine : IDisposable
             if (TryResolveGemKey(row.NormalizedName, out var gemKey))
             {
                 if (gemKey is not null && snapshot.TryGetValue(gemKey, out var gemEntry))
-                    rows.Add(new PriceRow(stableY, row.RawText, gemEntry.DivineValue, gemEntry.ExaltedValue,
-                        true, row.Multiplier, gemKey, true));
+                {
+                    if (gemEntry.HasMarketData)
+                        rows.Add(new PriceRow(stableY, row.RawText, gemEntry.DivineValue, gemEntry.ExaltedValue,
+                            true, row.Multiplier, gemKey, true));
+                    else
+                        rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, gemKey, true, MemeKind.NoInfo));
+                }
                 else
                     // Recognised as an uncut gem but type+level didn't pin to a known price → '?', never fuzzy.
                     rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName));
@@ -408,7 +413,13 @@ internal sealed class ScanEngine : IDisposable
             }
 
             if (entry != null)
-                rows.Add(new PriceRow(stableY, row.RawText, entry.DivineValue, entry.ExaltedValue, true, row.Multiplier, matchedKey, exact));
+            {
+                if (entry.HasMarketData)
+                    rows.Add(new PriceRow(stableY, row.RawText, entry.DivineValue, entry.ExaltedValue, true, row.Multiplier, matchedKey, exact));
+                else
+                    // Known item (matched in poe.ninja) but no trading data — show "no info".
+                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, matchedKey, true, MemeKind.NoInfo));
+            }
             else
                 rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName));
         }

@@ -8,7 +8,7 @@ namespace PoeAncientsPriceHelper;
 
 // DivineValue  = price in divine orbs (primaryValue from API)
 // ExaltedValue = DivineValue * core.rates.exalted (computed, for display when < 1 divine)
-internal sealed record PriceEntry(decimal DivineValue, decimal ExaltedValue);
+internal sealed record PriceEntry(decimal DivineValue, decimal ExaltedValue, bool HasMarketData = true);
 
 // Atomic snapshot of prices + length index, published together so the scan loop can never
 // see a new _prices with a stale _keysByLength (or vice versa) during a background refresh.
@@ -159,17 +159,21 @@ internal sealed class PriceRepository : IDisposable
             {
                 var id = line["id"]?.Value<string>();
                 if (id is null || !nameMap.TryGetValue(id, out var name)) continue;
-                // Skip items with no trading data (primaryValue is null in the API response).
-                // Previously these were added with price 0, causing the overlay to show "0 divines"
-                // for items that simply have no market data.
+                // Items with null primaryValue exist in poe.ninja but have no trading data.
+                // Keep them in the dictionary (marked HasMarketData=false) so the overlay can show
+                // "no info" for known items instead of being invisible.
                 var primaryValueToken = line["primaryValue"];
-                if (primaryValueToken is null || primaryValueToken.Type == JTokenType.Null) continue;
+                var key = NameNormalizer.Normalize(name);
+                if (string.IsNullOrEmpty(key)) continue;
+                if (primaryValueToken is null || primaryValueToken.Type == JTokenType.Null)
+                {
+                    result[key] = new PriceEntry(0m, 0m, HasMarketData: false);
+                    continue;
+                }
                 var primaryValue = primaryValueToken.Value<decimal>();
                 var divineValue = primaryValue * divinePerPrimary;
                 var exaltedValue = Math.Round(primaryValue * exaltedPerPrimary, 1);
-                var key = NameNormalizer.Normalize(name);
-                if (!string.IsNullOrEmpty(key))
-                    result[key] = new PriceEntry(divineValue, exaltedValue);
+                result[key] = new PriceEntry(divineValue, exaltedValue);
             }
         }
         catch (Exception ex)
