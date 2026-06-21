@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Donor thank-you on the Credits screen** — a note thanking everyone who has supported the project
+  with a donation.
 - **Startup-crash diagnostics.** A top-level handler in `Program.Main` now catches any exception that
   kills the app before it's fully up, writes a full report to `%LocalAppData%\PoeAncientsPriceHelper\crash.log`,
   and shows a dialog pointing the user at that file. Previously a launch-time crash left no trace at
