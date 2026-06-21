@@ -65,6 +65,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="140"/>
@@ -125,7 +127,7 @@
                 Background="#1A3A1A" Foreground="#66FF66" BorderBrush="#337733"
                 Click="StartStopButton_Click"/>
 
-        <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+        <StackPanel Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="2"
                     HorizontalAlignment="Left" VerticalAlignment="Bottom"
                     Orientation="Horizontal">
             <TextBlock x:Name="VersionLabel"
@@ -144,14 +146,18 @@
             </StackPanel>
         </StackPanel>
 
-        <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+        <!-- The update notice gets its own row directly above the bottom bar so its (variable-length)
+             text can never overlap the theme dropdown or the donate button. Collapsed when up to date,
+             and Row 9 is Auto, so it takes no space until an update is actually staged. -->
+        <TextBlock Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2"
                    x:Name="UpdateLink"
-                   HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   TextAlignment="Center" Margin="0,0,0,8"
                    Foreground="#FF5555" FontSize="11" FontWeight="SemiBold"
                    Cursor="Hand" Visibility="Collapsed" TextDecorations="Underline"
                    MouseLeftButtonUp="UpdateLink_Click"/>
 
-        <Button Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+        <Button Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="2"
                 x:Name="DonateButton" Style="{StaticResource FlatButton}"
                 Content="☕ Buy me a coffee"
                 HorizontalAlignment="Right" VerticalAlignment="Bottom"

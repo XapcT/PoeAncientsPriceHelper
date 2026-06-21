@@ -4,6 +4,15 @@ All notable changes to **Poe Ancients Price Helper** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The "Update now" link no longer overlaps the theme dropdown and donate button.** All three shared
+  a single bottom grid cell, so the (variable-length) update notice drew on top of the bottom bar when
+  a release was available. The notice now sits on its own row directly above the bar, and collapses to
+  nothing when up to date.
+
 ## [3.1.0] — 2026-06-21
 
 ### Changed
