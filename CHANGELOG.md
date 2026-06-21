@@ -4,6 +4,40 @@ All notable changes to **Poe Ancients Price Helper** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] — 2026-06-21
+
+The app now **installs and updates itself**, and **remembers your settings across updates** — no more
+re-downloading, re-unzipping, or re-calibrating on every release.
+
+### Added
+
+- **Automatic updates via [Velopack](https://velopack.io/)** (MIT), served straight from this repo's
+  GitHub Releases — no separate update server. On startup the app checks for a newer release and
+  downloads it in the background; an **"Update now"** link installs + relaunches instantly, or — if
+  ignored — the staged update is **applied silently when the app is next closed**, so the following
+  launch is already up to date.
+- **Per-user installer** (`Setup.exe`) replacing the portable zip; installs under `%LocalAppData%`,
+  no admin required.
+
+### Changed
+
+- **Settings now persist in `%LocalAppData%\PoeAncientsPriceHelper`** (calibration, league, hotkeys,
+  theme) instead of next to the executable, so updates never wipe them.
+- README documents the installer flow, how auto-update works, and third-party acknowledgements
+  (Velopack/WPF UI/SharpHook/Vortice/Newtonsoft, all MIT).
+
+### Migration
+
+- One-time only: installing v3.0.0 over an old unzipped v2.x build means re-picking your league and
+  re-calibrating **once** (settings moved to a stable location). After that, updates are automatic and
+  your settings carry across them.
+
+### Internals
+
+- Explicit `Program.Main` runs `VelopackApp.Build().Run()` before app startup; the "Update now" and
+  on-exit apply paths were verified end-to-end against a local Velopack feed (including the
+  relaunch-vs-single-instance-mutex interaction).
+
 ## [2.2.0] — 2026-06-21
 
 Based on community PR #24 by **@exploitz86**. 🙏
