@@ -28,4 +28,22 @@ internal static class AppPaths
         try { File.AppendAllText(Path.Combine(DataDir, "update.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  {message}{Environment.NewLine}"); }
         catch { /* logging must never throw */ }
     }
+
+    // Records a fatal exception to crash.log and returns the path so the caller can point the user at
+    // it. Until #27, a launch-time crash left no trace at all: the app is a WinExe (nothing prints to
+    // a console) and the --debug console isn't attached until partway through App.OnStartup — past the
+    // Velopack init and InitializeComponent() where startup actually fails. crash.log lives in DataDir,
+    // not next to the exe, so it's always writable and survives the Velopack `current\` swap.
+    // Best-effort: returns null if the file couldn't be written; logging must never throw.
+    public static string? LogCrash(string context, Exception? ex)
+    {
+        try
+        {
+            var path = Path.Combine(DataDir, "crash.log");
+            File.AppendAllText(path,
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  [{context}] {ex?.ToString() ?? "(no exception object)"}{Environment.NewLine}{new string('-', 80)}{Environment.NewLine}");
+            return path;
+        }
+        catch { return null; }
+    }
 }

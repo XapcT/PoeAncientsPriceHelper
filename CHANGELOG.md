@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Startup-crash diagnostics.** A top-level handler in `Program.Main` now catches any exception that
+  kills the app before it's fully up, writes a full report to `%LocalAppData%\PoeAncientsPriceHelper\crash.log`,
+  and shows a dialog pointing the user at that file. Previously a launch-time crash left no trace at
+  all — the app is a WinExe (nothing prints to a console) and the `--debug` console attaches too late
+  to catch failures in Velopack init or `InitializeComponent()` — making field reports undiagnosable.
+  The exception is still rethrown, so the existing exit behaviour is unchanged. (#27)
 - **`CONTRIBUTING.md`** — contribution policy: source-only (no prebuilt binaries are reviewed or
   merged), changes land as pull requests rather than issue attachments, and localization / region
   support is accepted as **opt-in, community-maintained data files** (the `custom_prices.json`
