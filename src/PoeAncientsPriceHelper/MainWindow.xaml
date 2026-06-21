@@ -135,11 +135,6 @@
                 <ComboBox x:Name="ThemeBox" FontSize="11" MinWidth="90"
                           SelectionChanged="ThemeBox_SelectionChanged"/>
             </StackPanel>
-            <StackPanel Orientation="Vertical" Margin="8,0,0,0">
-                <TextBlock Text="Font" Foreground="#999" FontSize="11" Margin="0,0,0,2"/>
-                <ComboBox x:Name="FontBox" FontSize="11" MinWidth="120"
-                          SelectionChanged="FontBox_SelectionChanged"/>
-            </StackPanel>
         </StackPanel>
 
         <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"

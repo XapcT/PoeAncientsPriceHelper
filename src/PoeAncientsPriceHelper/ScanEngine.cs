@@ -122,7 +122,7 @@ internal sealed class ScanEngine : IDisposable
         const int OpenBrightness = 100;
         const int CloseBrightness = 80;
 
-        PriceOverlayManager.EnsureVisible(_config.RegionRect, _config.OverlayXOffset, _icons, _config.OverlayFont);
+        PriceOverlayManager.EnsureVisible(_config.RegionRect, _config.OverlayXOffset, _icons);
         Log("overlay ready");
 
         while (!ct.IsCancellationRequested)

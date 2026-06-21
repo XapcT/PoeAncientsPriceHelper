@@ -30,12 +30,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="fonts\*.ttf">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
-  <ItemGroup>
     <InternalsVisibleTo Include="PoeAncientsPriceHelper.Tests" />
   </ItemGroup>
 

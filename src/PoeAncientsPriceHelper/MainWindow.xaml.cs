@@ -160,7 +160,6 @@ public partial class MainWindow : Window
         App.SetCalibrateKey(calibrate);
         UpdateRegionLabel();
         PopulateThemeBox();
-        PopulateFontBox();
         _loading = false;
     }
 
@@ -185,22 +184,6 @@ public partial class MainWindow : Window
         _config.Theme = theme;
         ConfigStore.Save(_config);
         ApplyTheme(theme);
-    }
-
-    private void PopulateFontBox()
-    {
-        FontBox.ItemsSource = OverlayFontLoader.FontNames;
-        var saved = OverlayFontLoader.FontNames.Contains(_config.OverlayFont) ? _config.OverlayFont : "Fontin SmallCaps";
-        FontBox.SelectedItem = saved;
-    }
-
-    private void FontBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-        if (_loading || FontBox.SelectedItem is not string font) return;
-        _config.OverlayFont = font;
-        ConfigStore.Save(_config);
-        // Apply live if the overlay is running; otherwise it picks up the new font on next start.
-        PriceOverlayManager.UpdateFont(font);
     }
 
     private void UpdateRegionLabel()
