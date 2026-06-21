@@ -93,6 +93,10 @@ internal sealed class ScanEngine : IDisposable
         IReadOnlyList<PriceRow> lastPushedRows = [];
         bool lastPushedConfirmed = false;
         bool lastPushedReading = false;
+        // Short-lived per-item stack memory: name → (multiplier, expiry). OCR can drop the leading
+        // "Nx" marker on a stack for a frame or two; this keeps a known stack's multiplier alive so
+        // the price label doesn't oscillate between unit-only and total(each). (See MergeReads.)
+        var quantityMemory = new Dictionary<string, (int Multiplier, DateTime ExpiresUtc)>(StringComparer.Ordinal);
         int topmostCounter = 0;
         const int TopmostEveryN = 10;
         bool isOpen = false;          // brightness gate: bright enough to attempt OCR
@@ -153,6 +157,7 @@ internal sealed class ScanEngine : IDisposable
                     }
                     isOpen = false; confirmedOpen = false; brightStreak = 0; darkStreak = 0;
                     slots.Clear(); lastRows = [];
+                    quantityMemory.Clear();
                     staleCount = 0;
                     _showing = false;
                     // Always push when dismissed to clear the overlay, and reset the change-tracker
@@ -240,7 +245,7 @@ internal sealed class ScanEngine : IDisposable
                                     Log("panel CONFIRMED (priced row found)");
                                 }
 
-                                lastRows = MergeReads(slots, reads);
+                                lastRows = MergeReads(slots, reads, quantityMemory, now);
                             }
                         }
                     }
@@ -248,6 +253,7 @@ internal sealed class ScanEngine : IDisposable
                     {
                         slots.Clear();
                         lastRows = [];
+                        quantityMemory.Clear();
                         confirmedOpen = false;
                         staleCount = 0;
                     }
@@ -259,10 +265,11 @@ internal sealed class ScanEngine : IDisposable
                     // Show prices only once OCR has confirmed a real list, not on brightness alone.
                     _showing = confirmedOpen;
                     // Skip the cross-thread UpdateState when nothing actually changed since the last
-                    // push — the loop ticks far faster than the displayed rows move.
+                    // push — the loop ticks far faster than the displayed rows move. The HUD is derived
+                    // from lastRows, so it can't change without the rows changing — no extra push gate.
                     if (!lastRows.SequenceEqual(lastPushedRows) || confirmedOpen != lastPushedConfirmed || reading != lastPushedReading)
                     {
-                        PriceOverlayManager.UpdateState(lastRows, confirmedOpen, reading);
+                        PriceOverlayManager.UpdateState(lastRows, confirmedOpen, reading, BuildDebugHud(lastRows));
                         lastPushedRows = lastRows.ToArray();
                         lastPushedConfirmed = confirmedOpen;
                         lastPushedReading = reading;
@@ -334,13 +341,13 @@ internal sealed class ScanEngine : IDisposable
                 {
                     if (gemEntry.HasMarketData)
                         rows.Add(new PriceRow(stableY, row.RawText, gemEntry.DivineValue, gemEntry.ExaltedValue,
-                            true, row.Multiplier, gemKey, true));
+                            true, row.Multiplier, gemKey, true, MultiplierExplicit: row.MultiplierExplicit));
                     else
-                        rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, gemKey, true, MemeKind.NoInfo));
+                        rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, gemKey, true, MemeKind.NoInfo, row.MultiplierExplicit));
                 }
                 else
                     // Recognised as an uncut gem but type+level didn't pin to a known price → '?', never fuzzy.
-                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName));
+                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName, MultiplierExplicit: row.MultiplierExplicit));
                 continue;
             }
 
@@ -350,12 +357,12 @@ internal sealed class ScanEngine : IDisposable
             //    currency") → Mirror of Kalandra. "unique belt" → Headhunter.
             if (row.NormalizedName.Contains("random") && row.NormalizedName.Contains("currency"))
             {
-                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "random currency", true, MemeKind.Mirror));
+                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "random currency", true, MemeKind.Mirror, row.MultiplierExplicit));
                 continue;
             }
             if (row.NormalizedName.Contains("unique") && row.NormalizedName.Contains("belt"))
             {
-                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "unique belt", true, MemeKind.Headhunter));
+                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "unique belt", true, MemeKind.Headhunter, row.MultiplierExplicit));
                 continue;
             }
 
@@ -415,13 +422,13 @@ internal sealed class ScanEngine : IDisposable
             if (entry != null)
             {
                 if (entry.HasMarketData)
-                    rows.Add(new PriceRow(stableY, row.RawText, entry.DivineValue, entry.ExaltedValue, true, row.Multiplier, matchedKey, exact));
+                    rows.Add(new PriceRow(stableY, row.RawText, entry.DivineValue, entry.ExaltedValue, true, row.Multiplier, matchedKey, exact, MultiplierExplicit: row.MultiplierExplicit));
                 else
                     // Known item (matched in poe.ninja) but no trading data — show "no info".
-                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, matchedKey, true, MemeKind.NoInfo));
+                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, matchedKey, true, MemeKind.NoInfo, row.MultiplierExplicit));
             }
             else
-                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName));
+                rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName, MultiplierExplicit: row.MultiplierExplicit));
         }
         _lastPositions = newPositions;
         return rows;
@@ -517,11 +524,22 @@ internal sealed class ScanEngine : IDisposable
         public int Unseen;               // consecutive passes this slot wasn't matched
     }
 
-    private IReadOnlyList<PriceRow> MergeReads(List<RowSlot> slots, IReadOnlyList<PriceRow> reads)
+    private IReadOnlyList<PriceRow> MergeReads(
+        List<RowSlot> slots,
+        IReadOnlyList<PriceRow> reads,
+        Dictionary<string, (int Multiplier, DateTime ExpiresUtc)> quantityMemory,
+        DateTime nowUtc)
     {
         const int Tolerance = 20;   // px: how far a read can move and still be the same row
         const int Confirm = 2;      // matching fuzzy/prefix reads before a row locks (exact: 1)
         const int EvictAfter = 3;   // passes a slot can go unmatched before it's dropped
+        const int QuantityMemoryMs = 1500;  // how long a seen stack multiplier survives an Nx dropout
+
+        // Drop expired memory so a long-gone stack can't resurrect a multiplier on a same-named item.
+        foreach (var stale in quantityMemory.Where(kv => kv.Value.ExpiresUtc <= nowUtc)
+                                            .Select(kv => kv.Key)
+                                            .ToList())
+            quantityMemory.Remove(stale);
 
         // Panel-switch detection: the user opened a different panel without the overlay closing.
         // Locked rows are otherwise sticky (a miss never unlocks them), so they'd keep showing the
@@ -576,8 +594,31 @@ internal sealed class ScanEngine : IDisposable
                 {
                     if (!slot.Locked || slot.LockedRow.Name != read.Name)
                         Log($"locked y={slot.Y} '{read.Name}'");
+
+                    // Stack stickiness: an explicitly-read Nx always wins; otherwise a row that already
+                    // locked onto a stack, or saw one within the memory window, keeps that multiplier
+                    // through a pass where OCR drops the marker and reads a bare 1x.
+                    int remembered = RememberedMultiplier(quantityMemory, read.Name, nowUtc);
+                    int priorLocked = slot.Locked && slot.LockedRow.Name == read.Name ? slot.LockedRow.Multiplier : 1;
+                    int effectiveMultiplier = ResolveMultiplierForDisplay(
+                        read.Multiplier, read.MultiplierExplicit, priorLocked, remembered);
+
+                    bool effectiveExplicit = read.MultiplierExplicit;
+                    if (effectiveMultiplier > 1 && slot.Locked && slot.LockedRow.Name == read.Name)
+                        effectiveExplicit = slot.LockedRow.MultiplierExplicit || read.MultiplierExplicit;
+
+                    // Refresh memory whenever we believe this row is a stack, so a one-pass dropout
+                    // keeps showing the stack total instead of flickering back to the unit price.
+                    if (!string.IsNullOrEmpty(read.Name) && effectiveMultiplier > 1)
+                        quantityMemory[read.Name] = (effectiveMultiplier, nowUtc.AddMilliseconds(QuantityMemoryMs));
+
                     slot.Locked = true;
-                    slot.LockedRow = read with { CenterY = slot.Y };
+                    slot.LockedRow = read with
+                    {
+                        CenterY = slot.Y,
+                        Multiplier = effectiveMultiplier,
+                        MultiplierExplicit = effectiveExplicit,
+                    };
                 }
             }
             // A miss (read.HasPrice == false) does NOT reset the pending streak. A miss means
@@ -601,6 +642,41 @@ internal sealed class ScanEngine : IDisposable
                 : s.Latest with { CenterY = s.Y, HasPrice = false, DivineValue = 0m, ExaltedValue = 0m });
         }
         return display;
+    }
+
+    // Decide which stack multiplier to display for a row. An explicit "Nx" read this pass always
+    // wins. Failing that, a row that already locked onto a stack keeps it; failing that, a stack
+    // seen recently (memory window, non-explicit read only) is reused. Otherwise it's a plain 1x.
+    internal static int ResolveMultiplierForDisplay(
+        int readMultiplier,
+        bool readMultiplierExplicit,
+        int priorLockedMultiplier,
+        int rememberedMultiplier)
+    {
+        if (readMultiplier > 1) return readMultiplier;
+        if (priorLockedMultiplier > 1) return priorLockedMultiplier;
+        if (!readMultiplierExplicit && rememberedMultiplier > 1) return rememberedMultiplier;
+        return readMultiplier;
+    }
+
+    private static int RememberedMultiplier(
+        Dictionary<string, (int Multiplier, DateTime ExpiresUtc)> quantityMemory,
+        string name,
+        DateTime nowUtc)
+    {
+        if (string.IsNullOrEmpty(name)) return 1;
+        if (!quantityMemory.TryGetValue(name, out var m) || m.ExpiresUtc <= nowUtc) return 1;
+        return Math.Max(1, m.Multiplier);
+    }
+
+    // F3-only diagnostic line: how many rows OCR produced, how many are priced, and how the priced
+    // stacks split between an explicit Nx read and one carried by quantity memory.
+    private static string BuildDebugHud(IReadOnlyList<PriceRow> rows)
+    {
+        int priced = rows.Count(r => r.HasPrice);
+        int explicitQty = rows.Count(r => r.HasPrice && r.Multiplier > 1 && r.MultiplierExplicit);
+        int memoryQty = rows.Count(r => r.HasPrice && r.Multiplier > 1 && !r.MultiplierExplicit);
+        return $"rows={rows.Count} priced={priced} qty-exp={explicitQty} qty-mem={memoryQty}";
     }
 
     public void Dispose()

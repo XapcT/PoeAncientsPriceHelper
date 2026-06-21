@@ -7,7 +7,8 @@ using Windows.Media.Ocr;
 
 namespace PoeAncientsPriceHelper;
 
-internal sealed record OcrRow(string NormalizedName, string RawText, int CenterY, int Multiplier = 1);
+internal sealed record OcrRow(string NormalizedName, string RawText, int CenterY,
+                              int Multiplier = 1, bool MultiplierExplicit = false);
 
 internal sealed class OcrScanner
 {
@@ -100,6 +101,7 @@ internal sealed class OcrScanner
             string? reject = null;
             string normalized = "";
             int multiplier = 1;
+            bool multiplierExplicit = false;
             int centerY = 0;
 
             if (string.IsNullOrWhiteSpace(text))
@@ -114,14 +116,14 @@ internal sealed class OcrScanner
             {
                 centerY = GetLineCenterY(line, bitmapHeight, scale);
                 var normalizedRaw = NameNormalizer.Normalize(text);
-                multiplier = ExtractMultiplier(normalizedRaw);
+                (multiplier, multiplierExplicit) = ExtractMultiplierWithConfidence(normalizedRaw);
                 normalized = StripLeadingNoise(normalizedRaw);
                 if (normalized.Length < MinNameLength) reject = "short";
                 else if (!HasLongWord(normalized, MinWordLength)) reject = "noword";
             }
 
             if (reject is null)
-                rows.Add(new OcrRow(normalized, text.Trim(), centerY, multiplier));
+                rows.Add(new OcrRow(normalized, text.Trim(), centerY, multiplier, multiplierExplicit));
             diag?.Add($"y={centerY} words={line.Words.Count} '{(text ?? "").Trim()}'{(reject is null ? "" : $" REJ:{reject}")}");
         }
 
@@ -161,12 +163,19 @@ internal sealed class OcrScanner
     // The list shows a stack quantity as "Nx" before the item name ("1x", "2x", "14x").
     // Capture it so the price can be multiplied by the stack size. Read from the raw
     // normalized string BEFORE StripLeadingNoise removes the marker. Returns 1 when absent.
-    internal static int ExtractMultiplier(string normalized)
+    internal static int ExtractMultiplier(string normalized) =>
+        ExtractMultiplierWithConfidence(normalized).Multiplier;
+
+    // Same parse, but also reports whether an explicit "Nx" marker was actually read (Explicit=true)
+    // versus the absent-marker fallback to 1 (Explicit=false). The caller uses that to tell a real
+    // stack from an assumed single, so a pass where OCR drops the marker doesn't flip a known stack
+    // back to a unit price. (See ScanEngine quantity memory.)
+    internal static (int Multiplier, bool Explicit) ExtractMultiplierWithConfidence(string normalized)
     {
         var m = MultiplierPattern.Match(normalized);
         if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n >= 1)
-            return Math.Min(n, 999);
-        return 1;
+            return (Math.Min(n, 999), true);
+        return (1, false);
     }
 
     // Strip leading noise: short/numeric tokens ("e", "l8"), then anything before the first

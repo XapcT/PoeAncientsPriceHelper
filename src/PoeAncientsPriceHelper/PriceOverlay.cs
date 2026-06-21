@@ -17,7 +17,7 @@ namespace PoeAncientsPriceHelper;
 //   Headhunter — OCR'd "unique belt"        → Headhunter icon + "Headhunter!".
 internal enum MemeKind { None, Mirror, Headhunter, NoInfo }
 
-internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false, MemeKind Meme = MemeKind.None);
+internal sealed record PriceRow(int CenterY, string OcrText, decimal DivineValue, decimal ExaltedValue, bool HasPrice, int Multiplier = 1, string Name = "", bool ExactMatch = false, MemeKind Meme = MemeKind.None, bool MultiplierExplicit = false);
 
 internal sealed class PriceOverlayForm : Form
 {
@@ -30,6 +30,8 @@ internal sealed class PriceOverlayForm : Form
     private IReadOnlyList<PriceRow> _lastRenderedRows = [];
     private bool _lastPanelOpen;
     private bool _lastReading;
+    private string _debugHud = "";       // F3-only diagnostic line (row/qty counts); empty = nothing to draw
+    private string _lastDebugHud = "";
     private readonly IconCache _icons;
     private readonly Rectangle _regionRect;
     private readonly int _xOffset;
@@ -72,13 +74,14 @@ internal sealed class PriceOverlayForm : Form
         }
     }
 
-    public void UpdateState(IReadOnlyList<PriceRow> rows, bool panelOpen, bool reading)
+    public void UpdateState(IReadOnlyList<PriceRow> rows, bool panelOpen, bool reading, string? debugHud)
     {
         if (IsDisposed) return;
-        if (InvokeRequired) { BeginInvoke(() => UpdateState(rows, panelOpen, reading)); return; }
+        if (InvokeRequired) { BeginInvoke(() => UpdateState(rows, panelOpen, reading, debugHud)); return; }
         _rows = rows;
         _panelOpen = panelOpen;
         _reading = reading;
+        _debugHud = debugHud ?? "";
 
         // ApplyVisibility must run on every visibility transition (show/hide) even if the rows are
         // unchanged; RenderLayered only needs to run when something the user can see actually changed.
@@ -86,14 +89,16 @@ internal sealed class PriceOverlayForm : Form
         bool visibilityChanged = shouldShow != Visible;
         bool rowsChanged = !_rows.SequenceEqual(_lastRenderedRows);
         bool stateChanged = _panelOpen != _lastPanelOpen || _reading != _lastReading;
+        bool hudChanged = _debug && _debugHud != _lastDebugHud;   // only the F3 layer draws the HUD
 
-        if (visibilityChanged || rowsChanged || stateChanged)
+        if (visibilityChanged || rowsChanged || stateChanged || hudChanged)
         {
             ApplyVisibility(shouldShow);
             if (Visible) RenderLayered();
             _lastRenderedRows = _rows.ToArray();  // snapshot to avoid aliasing the scan loop's buffer
             _lastPanelOpen = _panelOpen;
             _lastReading = _reading;
+            _lastDebugHud = _debugHud;
         }
     }
 
@@ -104,6 +109,7 @@ internal sealed class PriceOverlayForm : Form
         if (InvokeRequired) { BeginInvoke(ToggleDebug); return; }
         _debug = !_debug;
         _lastRenderedRows = [];   // invalidate cache so the next UpdateState forces a fresh render
+        _lastDebugHud = "";
         ApplyVisibility(_panelOpen || _reading || _debug);
         if (Visible) RenderLayered();
     }
@@ -129,6 +135,7 @@ internal sealed class PriceOverlayForm : Form
         _lastPanelOpen = false;
         _lastReading = false;
         _lastRenderedRows = [];
+        _lastDebugHud = "";
         ApplyVisibility(_debug);
         if (Visible) RenderLayered();
     }
@@ -201,6 +208,11 @@ internal sealed class PriceOverlayForm : Form
             var borderColor = _panelOpen ? Color.LimeGreen : Color.Orange;
             using var borderPen = new Pen(borderColor, 2);
             g.DrawRectangle(borderPen, _regionRect);
+            if (!string.IsNullOrEmpty(_debugHud))
+            {
+                using var hudBrush = new SolidBrush(Color.FromArgb(220, 220, 220));
+                g.DrawString(_debugHud, _debugFont, hudBrush, _regionRect.Left + 6, _regionRect.Top + 6);
+            }
         }
 
         if (!_panelOpen) return;
@@ -486,8 +498,8 @@ internal static class PriceOverlayManager
     public static void Hide() =>
         WithForm(f => f.Invoke(() => { if (!f.IsDisposed) f.Close(); }));
 
-    public static void UpdateState(IReadOnlyList<PriceRow> rows, bool panelOpen, bool reading) =>
-        WithForm(f => f.UpdateState(rows, panelOpen, reading));
+    public static void UpdateState(IReadOnlyList<PriceRow> rows, bool panelOpen, bool reading, string? debugHud = null) =>
+        WithForm(f => f.UpdateState(rows, panelOpen, reading, debugHud));
 
     public static void ForceTopmost() => WithForm(f => f.ForceTopmost());
 
