@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Update checks now run every 30 minutes, not just at startup.** The check piggybacks on the
+  existing poe.ninja price-refresh cycle, so a release published while the app is left running (it
+  lives in the tray during a play session) is downloaded and staged without a restart — the "Update
+  now" link simply appears. The check no-ops once a build is staged and is reentrancy-guarded so it
+  can't overlap itself.
+
 ### Added
 
 - **Startup-crash diagnostics.** A top-level handler in `Program.Main` now catches any exception that

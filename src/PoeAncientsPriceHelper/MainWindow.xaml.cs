@@ -90,14 +90,19 @@ public partial class MainWindow : Window
         _ = CheckForUpdatesAsync();
     }
 
-    // Check GitHub Releases for a newer build via Velopack on startup. If one is found, eagerly
-    // download/stage it in the background so both "Update now" (the link below) and the silent
-    // apply-on-exit (#14) are instant. Only works from an installed build — in a dev/unpacked run
-    // UpdateManager.IsInstalled is false and this no-ops. Any failure (offline, rate-limited, not
-    // installed) is swallowed: the link just stays hidden, exactly as the old check did. Stable only
-    // (prerelease: false). The manager + staged UpdateInfo are retained for the on-exit apply (#14).
+    // Check GitHub Releases for a newer build via Velopack on startup AND on every 30-min price
+    // refresh (see OnPricesUpdated), so a release published while the app is left running gets picked
+    // up without a restart. If one is found, eagerly download/stage it in the background so both
+    // "Update now" (the link below) and the silent apply-on-exit (#14) are instant. Only works from an
+    // installed build — in a dev/unpacked run UpdateManager.IsInstalled is false and this no-ops. Any
+    // failure (offline, rate-limited, not installed) is swallowed: the link just stays hidden, exactly
+    // as the old check did. Stable only (prerelease: false). The manager + staged UpdateInfo are
+    // retained for the on-exit apply (#14).
     private UpdateManager? _updateManager;
     private UpdateInfo? _stagedUpdate;
+    // 0/1 reentrancy flag (via Interlocked): the startup check can overlap the first timer tick, and a
+    // slow GitHub response can outlast the 30-min interval — either way only one check runs at a time.
+    private int _updateCheckInFlight;
 
     // Update feed: GitHub Releases in production. If POEPRICE_UPDATE_FEED names a local folder (a
     // `vpk pack` output dir), read from it via SimpleFileSource instead — that lets the full
@@ -116,6 +121,12 @@ public partial class MainWindow : Window
 
     private async Task CheckForUpdatesAsync()
     {
+        // A build is already staged and waiting to apply (on "Update now" or on exit) — re-checking
+        // every 30 min would just re-download the same release. Stop once we've found one.
+        if (_stagedUpdate is not null) return;
+        // Drop this check if one is already running (startup overlapping the first tick, or a slow
+        // check spanning a tick). Exchange returns the prior value: 1 means a check is already in flight.
+        if (Interlocked.Exchange(ref _updateCheckInFlight, 1) == 1) return;
         try
         {
             var mgr = new UpdateManager(ResolveUpdateSource());
@@ -148,6 +159,7 @@ public partial class MainWindow : Window
             });
         }
         catch (Exception ex) { AppPaths.LogUpdate($"check failed: {ex.GetType().Name}: {ex.Message}"); }
+        finally { Interlocked.Exchange(ref _updateCheckInFlight, 0); }
     }
 
     private void CreditsLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -277,7 +289,14 @@ public partial class MainWindow : Window
     // The 30-min background refresh fires on a thread-pool thread — marshal to the UI thread
     // before touching the label. (Previously the label was set once at startup and never updated,
     // so it stayed frozen at the launch-time fetch even though prices kept refreshing.)
-    private void OnPricesUpdated() => Dispatcher.BeginInvoke(UpdateStatusLabel);
+    private void OnPricesUpdated()
+    {
+        Dispatcher.BeginInvoke(UpdateStatusLabel);
+        // Piggyback the update check on the 30-min price refresh: a build released while the app is
+        // left running (common, since it lives in the tray during a play session) is now picked up
+        // without a restart. No-ops once something is staged, and is reentrancy-guarded. (#27 follow-up)
+        _ = CheckForUpdatesAsync();
+    }
 
     private void UpdateStatusLabel()
     {
