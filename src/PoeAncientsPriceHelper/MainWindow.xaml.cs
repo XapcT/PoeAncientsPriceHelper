@@ -129,7 +129,13 @@ public partial class MainWindow : Window
         if (Interlocked.Exchange(ref _updateCheckInFlight, 1) == 1) return;
         try
         {
-            var mgr = new UpdateManager(ResolveUpdateSource());
+            // Disable deltas (MaximumDeltasBeforeFallback < 0 → download the full package). Reconstructing
+            // a full release from a delta during the otherwise-silent background DownloadUpdatesAsync
+            // spawns Velopack's Update.exe, which flashes a visible window — seen on the first delta
+            // update (3.0.0 → 3.1.0). The full package is a larger download but keeps the background
+            // stage truly silent; the user only ever sees the "Update now" link.
+            var mgr = new UpdateManager(ResolveUpdateSource(),
+                new UpdateOptions { MaximumDeltasBeforeFallback = -1 });
             AppPaths.LogUpdate($"check start; IsInstalled={mgr.IsInstalled}");
             if (!mgr.IsInstalled) return;   // dev / unpacked run — nothing to update
 

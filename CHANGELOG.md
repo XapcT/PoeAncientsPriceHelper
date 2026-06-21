@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Background update downloads are now fully silent.** Reconstructing a release from a delta package
+  spawned Velopack's `Update.exe`, which flashed a visible window during the otherwise-silent
+  background download (seen on the first delta update, 3.0.0 → 3.1.0). Deltas are now disabled
+  (`MaximumDeltasBeforeFallback = -1`), so the app downloads the full package and the only thing the
+  user ever sees is the "Update now" link. (Trade-off: each update re-downloads the full package.)
 - **The "Update now" link no longer overlaps the theme dropdown and donate button.** All three shared
   a single bottom grid cell, so the (variable-length) update notice drew on top of the bottom bar when
   a release was available. The notice now sits on its own row directly above the bar, and collapses to
