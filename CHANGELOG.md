@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`CONTRIBUTING.md`** — contribution policy: source-only (no prebuilt binaries are reviewed or
+  merged), changes land as pull requests rather than issue attachments, and localization / region
+  support is accepted as **opt-in, community-maintained data files** (the `custom_prices.json`
+  pattern) rather than language-specific tables baked into core.
+
 ### Internals
 
 - Test coverage for four previously-untested `PriceRepository` paths (#26, **@atomsbaza** 🙏):
