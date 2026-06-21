@@ -128,6 +128,11 @@ public partial class MainWindow : Window
         catch { /* offline / rate-limited / shape change — fail silently, leave the link hidden */ }
     }
 
+    private void CreditsLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        new CreditsWindow { Owner = this }.ShowDialog();
+    }
+
     private void UpdateLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (string.IsNullOrEmpty(_updateUrl)) return;
