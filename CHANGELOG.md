@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   merged), changes land as pull requests rather than issue attachments, and localization / region
   support is accepted as **opt-in, community-maintained data files** (the `custom_prices.json`
   pattern) rather than language-specific tables baked into core.
+- **@atomsbaza** added to the in-app Credits screen for #26.
 
 ### Internals
 
