@@ -4,6 +4,16 @@ All notable changes to **Poe Ancients Price Helper** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Internals
+
+- Test coverage for four previously-untested `PriceRepository` paths (#26, **@atomsbaza** 🙏):
+  items with a null `primaryValue` are kept as `HasMarketData: false`; `custom_prices.json` keys are
+  accepted unnormalized (display names work); a malformed override file is ignored without crashing;
+  and a response missing the `core` block falls back to `primary = "divine"`. No production code
+  changed.
+
 ## [3.0.0] — 2026-06-21
 
 The app now **installs and updates itself**, and **remembers your settings across updates** — no more
