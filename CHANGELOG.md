@@ -4,7 +4,7 @@ All notable changes to **Poe Ancients Price Helper** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [3.1.0] — 2026-06-21
 
 ### Changed
 
@@ -318,6 +318,8 @@ First public release.
 - One-time calibration; stack-aware pricing (e.g. `2 (0.5 each)`).
 - Self-contained Windows x64 build.
 
+[3.1.0]: https://github.com/pedro-quiterio/PoeAncientsPriceHelper/releases/tag/v3.1.0
+[3.0.0]: https://github.com/pedro-quiterio/PoeAncientsPriceHelper/releases/tag/v3.0.0
 [2.0.0]: https://github.com/pedro-quiterio/PoeAncientsPriceHelper/releases/tag/v2.0.0
 [1.1.8]: https://github.com/pedro-quiterio/PoeAncientsPriceHelper/releases/tag/v1.1.8
 [1.1.7]: https://github.com/pedro-quiterio/PoeAncientsPriceHelper/releases/tag/v1.1.7
