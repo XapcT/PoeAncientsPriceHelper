@@ -14,6 +14,7 @@ public partial class CreditsWindow : Window
     [
         new("dhaern",     "https://github.com/dhaern"),
         new("exploitz86", "https://github.com/exploitz86"),
+        new("atomsbaza",  "https://github.com/atomsbaza"),
     ];
 
     public CreditsWindow()
