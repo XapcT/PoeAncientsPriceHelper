@@ -4,6 +4,62 @@ All notable changes to **Poe Ancients Price Helper** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-06-21
+
+Based on community PR #24 by **@exploitz86**. 🙏
+
+### Fixed
+
+- **Stacked items no longer flicker between unit price and total** (#24) — Windows OCR
+  intermittently drops the leading `Nx` quantity marker on a stacked row for a frame, which made the
+  price label oscillate between the per-unit price and the stack total. Quantity reads now carry an
+  *explicit-vs-assumed* flag, and a short-lived (1.5s) per-item memory keeps a known stack's
+  multiplier through a pass that misreads it as `1x`, instead of snapping back. (Thanks @exploitz86.)
+
+### Added
+
+- **Contributors credits screen** — a **Credits** link beside the version (bottom-left of the
+  settings window) opens a small dialog thanking community contributors, with links to their GitHub
+  profiles. The list is a curated static array (not the GitHub contributors graph) so PR authors
+  whose work was reimplemented under maintainer commits are still credited. Follows the selected
+  theme; adding a contributor is a one-line edit.
+
+### Notes
+
+- PR #24 also bundled a second per-frame OCR pass, halved scan intervals, a confidence-gated render
+  filter, and scroll heuristics. These were **left out** — they raise the always-on overlay's CPU/GPU
+  load substantially and the render filter could suppress legitimate fuzzy-matched single-item prices.
+  Only the stack-quantity fix was kept and re-implemented with unit tests (96 tests pass). A security
+  review of the contribution found no new network calls, process execution, file writes, reflection,
+  or native interop — the change is confined to the OCR-to-display path.
+
+## [2.1.0] — 2026-06-21
+
+A community release built almost entirely on PR #23 by **@dhaern (Raxxoor)**. 🙏
+
+### Added
+
+- **Modern settings UI** — migrated from MahApps.Metro to **WPF UI (lepoco)** for a native, actively
+  maintained Fluent / Windows 11 look on .NET 10.
+- **Theme switcher** — 5 dark themes from the settings window (Toxic [default], Midnight, Obsidian,
+  Abyss, Ember). Only the window background changes; button colors are untouched. Saved in
+  `config.json`.
+
+### Fixed
+
+- **Items with no trading data no longer show a false "0 divines"** — poe.ninja returns no value for
+  items with no market data; these were treated as a real price of 0 and could surface as "0.00 d".
+  Such items are now shown as a dim **"no info"** instead, so a known item with no price can't
+  masquerade as a free one. (Thanks @dhaern.)
+
+### Notes
+
+- PR #23 also added a font selector with several bundled fonts. It was **left out for licensing
+  reasons** — a redistributable download can only bundle redistributable fonts, and Angie SmallCaps
+  (commercial) and Fontin SmallCaps (requires a paid app license) don't qualify. The overlay keeps
+  its built-in Consolas. A full security + quality review of the contribution was run before merging
+  (no new network/process/file-write behavior; bundled font files binary-inspected; 87 tests passed).
+
 ## [2.0.1] — 2026-06-19
 
 ### Fixed
