@@ -112,6 +112,12 @@ internal sealed class ScanEngine : IDisposable
         int dismissDark = 0;          // dark frames seen while dismissed — releases the latch when the panel closes
         int staleCount = 0;           // consecutive 0-row OCR passes — clears stale overlay on loading screens
         const int StaleLimit = 10;    // consecutive 0-row OCR passes before clearing (~800ms at 80ms interval)
+        // Consecutive OCR passes (whether 0-row or rows that didn't resolve) with NO priced row while
+        // the panel was already confirmed. The brightness gate misses a close into a bright/white scene
+        // (brightness never drops below CloseBrightness), so a confirmed panel can linger with its
+        // locked rows showing. This streak is the brightness-independent "the panel is gone" signal.
+        int noPriceStreak = 0;
+        const int NoPriceCloseLimit = 3;   // ~450ms at the OCR floor before a confirmed panel is dropped
         int cycleCount = 0;
         var lastOcrAt = DateTime.MinValue;
         const int MinOcrIntervalMs = 150;            // OCR floor while panel is open — Windows OCR is fast enough that 6.7/s gives sub-200ms turnaround
@@ -159,6 +165,7 @@ internal sealed class ScanEngine : IDisposable
                     slots.Clear(); lastRows = [];
                     quantityMemory.Clear();
                     staleCount = 0;
+                    noPriceStreak = 0;
                     _showing = false;
                     // Always push when dismissed to clear the overlay, and reset the change-tracker
                     // so the next real state is treated as new.
@@ -211,6 +218,7 @@ internal sealed class ScanEngine : IDisposable
                             if (ocrRows.Count == 0)
                             {
                                 staleCount++;
+                                noPriceStreak++;
                                 // Hide stale prices quickly (after 2 passes ≈ 160ms) so they don't
                                 // linger on loading screens, but keep slots alive until StaleLimit
                                 // for fast recovery when the panel reappears.
@@ -236,16 +244,45 @@ internal sealed class ScanEngine : IDisposable
                                         $"raw='{r.OcrText.Trim()}' y={r.CenterY} " +
                                         $"{(r.HasPrice ? $"HIT→'{r.Name}'" : "MISS")}")));
 
-                                // Confirm a real exchange panel only when OCR resolves an actual
-                                // priced item — combat effects / stray windows never do.
-                                if (!confirmedOpen && reads.Any(r => r.HasPrice))
+                                // "Any priced row this pass" both confirms a real exchange panel
+                                // (combat effects / stray windows never resolve to a price) and feeds
+                                // the lost-panel reset below.
+                                bool hasPriced = reads.Any(r => r.HasPrice);
+                                if (hasPriced)
                                 {
-                                    confirmedOpen = true;
-                                    suppressHintUntilConfirm = false;
-                                    Log("panel CONFIRMED (priced row found)");
+                                    noPriceStreak = 0;
+                                    if (!confirmedOpen)
+                                    {
+                                        confirmedOpen = true;
+                                        suppressHintUntilConfirm = false;
+                                        Log("panel CONFIRMED (priced row found)");
+                                    }
+                                }
+                                else
+                                {
+                                    noPriceStreak++;
                                 }
 
                                 lastRows = MergeReads(slots, reads, quantityMemory, now);
+                            }
+
+                            // Lost-panel reset (brightness-independent): a panel we'd CONFIRMED that
+                            // then yields no priced row for NoPriceCloseLimit passes has gone away —
+                            // even when the brightness gate still reads "open" because the panel
+                            // closed into a bright/white scene. Locked rows are otherwise sticky (a
+                            // miss never unlocks them), so without this they'd keep showing the
+                            // previous panel's prices on a false-positive bright frame. Clear them and
+                            // re-arm hint suppression so nothing shows until OCR confirms a real
+                            // priced row again.
+                            if (confirmedOpen && noPriceStreak >= NoPriceCloseLimit)
+                            {
+                                Log($"confirmed panel lost priced rows for {noPriceStreak} passes — clearing slots");
+                                slots.Clear();
+                                quantityMemory.Clear();
+                                lastRows = [];
+                                confirmedOpen = false;
+                                suppressHintUntilConfirm = true;
+                                noPriceStreak = 0;
                             }
                         }
                     }
@@ -256,6 +293,7 @@ internal sealed class ScanEngine : IDisposable
                         quantityMemory.Clear();
                         confirmedOpen = false;
                         staleCount = 0;
+                        noPriceStreak = 0;
                     }
 
                     // "reading" = brightness says a panel is up but OCR hasn't confirmed prices yet.
