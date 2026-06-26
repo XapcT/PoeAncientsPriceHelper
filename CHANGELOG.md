@@ -6,8 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.1] — 2026-06-26
+
 ### Fixed
 
+- **Stale prices no longer linger after a panel closes into a bright scene.** The overlay's price rows
+  are sticky (an OCR miss never unlocks a locked row), and a panel was only considered closed when the
+  screen brightness dropped. Closing the exchange panel into a bright/white map therefore never
+  registered as a close, so the previous panel's prices kept showing on a false-positive bright frame
+  until enough empty OCR passes cleared them. A confirmed panel that yields no priced row for a few
+  passes now clears immediately, independent of brightness, so false positives show nothing until a
+  real priced row is read again.
 - **Background update downloads are now fully silent.** Reconstructing a release from a delta package
   spawned Velopack's `Update.exe`, which flashed a visible window during the otherwise-silent
   background download (seen on the first delta update, 3.0.0 → 3.1.0). Deltas are now disabled
