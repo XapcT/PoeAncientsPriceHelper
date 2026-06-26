@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.2] — 2026-06-27
+
+### Fixed
+
+- **Switching between two panels now reads the second one immediately.** The ESC / Ctrl+click dismiss
+  latch only released after the calibrated region went dark, but brightness can't tell the dismissed
+  panel still being open from a different panel now being open — so opening a second panel (or closing
+  one into a bright scene) could leave the overlay stuck until something happened to darken the region,
+  sometimes seconds later. The latch now releases on content: it keeps scanning while dismissed and
+  shows a genuinely different panel right away, while still staying hidden when you Ctrl+click and keep
+  working in the same panel.
+
 ## [3.1.1] — 2026-06-26
 
 ### Fixed
