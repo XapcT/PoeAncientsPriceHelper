@@ -109,7 +109,16 @@ internal sealed class ScanEngine : IDisposable
         bool suppressHintUntilConfirm = false;
         int brightStreak = 0;
         int darkStreak = 0;
-        int dismissDark = 0;          // dark frames seen while dismissed — releases the latch when the panel closes
+        // Dismiss (ESC / Ctrl+click) is released on CONTENT, not brightness: brightness can't tell the
+        // dismissed panel still being open from a different panel now being open (both read bright), so
+        // a close into a bright scene — or a switch to another panel — used to leave the latch stuck.
+        // While dismissed we keep scanning and: release quietly once the dismissed panel's items are
+        // gone, or release and show once a DIFFERENT priced item appears. dismissedNames is the set of
+        // priced items on screen at the moment of dismissal (the "same panel" signature).
+        bool wasDismissed = false;    // edge-detect entry into the dismissed branch (to capture the signature once)
+        HashSet<string> dismissedNames = new(StringComparer.Ordinal);
+        int dismissNoPrice = 0;       // consecutive dismissed passes with no priced row (or dark) — panel gone
+        int dismissDiffStreak = 0;    // consecutive dismissed passes showing an item not in dismissedNames — new panel
         int staleCount = 0;           // consecutive 0-row OCR passes — clears stale overlay on loading screens
         const int StaleLimit = 10;    // consecutive 0-row OCR passes before clearing (~800ms at 80ms interval)
         // Consecutive OCR passes (whether 0-row or rows that didn't resolve) with NO priced row while
@@ -147,20 +156,24 @@ internal sealed class ScanEngine : IDisposable
                 bool brightFrame = brightness > OpenBrightness;   // strong enough to count toward opening
                 bool darkFrame = brightness < CloseBrightness;    // dim enough to count toward closing
 
-                // Dismissed (ESC / Left-Ctrl+click): stay hidden and don't scan until the panel
-                // actually closes (a few genuinely dark frames). ESC closes the panel so this clears
-                // quickly; Ctrl+click keeps it open, so the overlay stays dismissed (no flicker) until
-                // the user closes the panel. On release, arm hint-suppression so the next brightness
-                // blip can't re-show the overlay before OCR re-confirms a real panel.
+                // Dismissed (ESC / Left-Ctrl+click): stay hidden, but keep scanning so we can tell the
+                // dismissed panel still being open (keep hidden) from it closing / a different panel
+                // taking over (release). Release triggers: the region goes dark, the dismissed items
+                // disappear for a few passes (panel closed — covers a close into a bright scene), or a
+                // priced item not in the dismissed set shows up for 2 passes (a different panel).
                 if (_dismissed)
                 {
-                    if (darkFrame) dismissDark++; else dismissDark = 0;
-                    if (dismissDark >= DarkToRelease)
+                    // On entry, snapshot what was priced on screen as the "same panel" signature before
+                    // we clear anything. lastRows still holds the dismissed panel's rows here.
+                    if (!wasDismissed)
                     {
-                        _dismissed = false;
-                        suppressHintUntilConfirm = true;
-                        Log("dismiss released (panel closed)");
+                        dismissedNames = new HashSet<string>(
+                            lastRows.Where(r => r.HasPrice).Select(r => r.Name), StringComparer.Ordinal);
+                        dismissNoPrice = 0;
+                        dismissDiffStreak = 0;
                     }
+                    wasDismissed = true;
+
                     isOpen = false; confirmedOpen = false; brightStreak = 0; darkStreak = 0;
                     slots.Clear(); lastRows = [];
                     quantityMemory.Clear();
@@ -171,10 +184,68 @@ internal sealed class ScanEngine : IDisposable
                     // so the next real state is treated as new.
                     PriceOverlayManager.UpdateState([], false, false);
                     lastPushedRows = []; lastPushedConfirmed = false; lastPushedReading = false;
+
+                    if (darkFrame)
+                    {
+                        // Dark region — the panel is gone (panels read bright). Fast path, no OCR.
+                        dismissDiffStreak = 0;
+                        if (++dismissNoPrice >= DarkToRelease)
+                        {
+                            _dismissed = false; wasDismissed = false;
+                            suppressHintUntilConfirm = true;
+                            Log("dismiss released (region went dark)");
+                        }
+                    }
+                    else
+                    {
+                        var now = DateTime.UtcNow;
+                        if ((now - lastOcrAt).TotalMilliseconds >= MinOcrIntervalMs)
+                        {
+                            lastOcrAt = now;
+                            var ocrRows = scanner.Scan(bmp);
+                            var pricedNames = ocrRows.Count == 0
+                                ? new List<string>()
+                                : BuildPriceRows(ocrRows).Where(r => r.HasPrice).Select(r => r.Name).ToList();
+
+                            if (pricedNames.Count == 0)
+                            {
+                                // Nothing priced on screen — the dismissed panel has closed.
+                                dismissDiffStreak = 0;
+                                if (++dismissNoPrice >= DarkToRelease)
+                                {
+                                    _dismissed = false; wasDismissed = false;
+                                    suppressHintUntilConfirm = true;
+                                    Log("dismiss released (panel closed)");
+                                }
+                            }
+                            else if (pricedNames.Any(n => !dismissedNames.Contains(n)))
+                            {
+                                // An item that wasn't on the dismissed panel — a different panel is up.
+                                // Require two consecutive passes so a single OCR misread can't re-show
+                                // the same panel we just dismissed.
+                                dismissNoPrice = 0;
+                                if (++dismissDiffStreak >= 2)
+                                {
+                                    _dismissed = false; wasDismissed = false;
+                                    // A genuinely new panel — let the normal flow confirm and show it,
+                                    // so no hint suppression here.
+                                    Log("dismiss released (different panel detected)");
+                                }
+                            }
+                            else
+                            {
+                                // Same items as when dismissed — still that panel; keep it hidden.
+                                dismissNoPrice = 0;
+                                dismissDiffStreak = 0;
+                            }
+                        }
+                    }
                 }
                 else
                 {
-                    dismissDark = 0;
+                    wasDismissed = false;
+                    dismissNoPrice = 0;
+                    dismissDiffStreak = 0;
 
                     // Hysteresis: 2 consecutive bright frames to open, 3 dark frames to close; readings
                     // in the [CloseBrightness, OpenBrightness] dead zone hold the current state.
