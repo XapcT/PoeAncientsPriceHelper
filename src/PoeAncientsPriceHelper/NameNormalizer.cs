@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace PoeAncientsPriceHelper;
@@ -16,5 +17,25 @@ internal static class NameNormalizer
         s = NonWordSpace.Replace(s, " ");
         s = MultiSpace.Replace(s, " ");
         return s.Trim();
+    }
+
+    // Collapse glyphs the stylised PoE panel font / Windows OCR confuse into canonical classes
+    // (n/m/u→n, r/v→r, …), so a systematically garbled read still lines up with the true text. Used by
+    // the rumour matcher (name → key) and the panel detector (excluding garbled boilerplate). Input
+    // should already be Normalize()d.
+    public static string Skeleton(string normalized)
+    {
+        var sb = new StringBuilder(normalized.Length);
+        foreach (char c in normalized)
+            sb.Append(c switch
+            {
+                'w' or 'm' or 'n' or 'u' => 'n',
+                'r' or 'v' => 'r',
+                'i' or 'l' or 'j' or 't' => 'i',
+                'o' or '0' or 'e' or 'c' => 'o',
+                '4' or 'a' => 'a',
+                _ => c,
+            });
+        return sb.ToString();
     }
 }

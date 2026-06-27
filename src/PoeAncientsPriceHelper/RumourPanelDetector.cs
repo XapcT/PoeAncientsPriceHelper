@@ -22,12 +22,22 @@ internal static class RumourPanelDetector
     // Boilerplate inside the panel that is not a rumour name.
     private static readonly string[] Boilerplate = ["use a logbook to chart the area"];
 
+    // Skeletons of every non-rumour phrase, for tolerant exclusion of a garbled title/boilerplate line
+    // (e.g. an "ISLAND RUMOURS" title OCR mangled below the fuzzy threshold) that would otherwise show
+    // up as a stray "unknown rumour" row.
+    private static readonly string[] NonRumourSkeletons =
+        HeaderSignatures.Concat(FooterSignatures).Concat(Boilerplate)
+                        .Select(NameNormalizer.Skeleton).ToArray();
+
     // Looser than item matching — the panel header art OCRs rough, and a false positive is harmless
     // because the rumour names below it simply won't resolve.
     private const double SignatureThreshold = 0.72;
     // A rumour line must horizontally overlap the panel band by at least this fraction of its width.
     private const double MinHorizontalOverlap = 0.4;
     private const int MinRumourTextLength = 3;
+    // A line whose skeleton is this close to a non-rumour phrase is treated as boilerplate. 0.80 catches
+    // garbled titles while staying clear of the real rumour names (their skeletons are well separated).
+    private const double BoilerplateSkeletonThreshold = 0.80;
 
     public static DetectedRumourPanel? Detect(IReadOnlyList<OcrTextLine> lines)
     {
@@ -57,8 +67,7 @@ internal static class RumourPanelDetector
         {
             int centerY = line.Bounds.Top + line.Bounds.Height / 2;
             if (centerY < topAnchorBottom || centerY > footerTop) continue;
-            if (MatchesAny(line.Text, HeaderSignatures) || MatchesAny(line.Text, FooterSignatures)) continue;
-            if (MatchesAny(line.Text, Boilerplate)) continue;
+            if (IsNonRumourLine(line.Text)) continue;
             if (!HorizontallyOverlaps(line.Bounds, bandLeft, bandRight)) continue;
             var cleaned = line.Text.Trim();
             if (cleaned.Length < MinRumourTextLength || !cleaned.Any(char.IsLetter)) continue;
@@ -84,6 +93,27 @@ internal static class RumourPanelDetector
             int dist = ScanEngine.Levenshtein(norm, sig);
             double score = 1.0 - (double)dist / Math.Max(norm.Length, sig.Length);
             if (score >= SignatureThreshold) return true;
+        }
+        return false;
+    }
+
+    // True if a candidate rumour line is actually panel boilerplate (the title, header, footer, or the
+    // logbook hint). Checks the normal fuzzy signatures first, then a tolerant SKELETON comparison so a
+    // badly-garbled "ISLAND RUMOURS" title (which Windows OCR mangles like the rumour names) is still
+    // excluded instead of surfacing as a stray "unknown rumour" row.
+    private static bool IsNonRumourLine(string text)
+    {
+        if (MatchesAny(text, HeaderSignatures) || MatchesAny(text, FooterSignatures) || MatchesAny(text, Boilerplate))
+            return true;
+
+        var skel = NameNormalizer.Skeleton(NameNormalizer.Normalize(text));
+        if (skel.Length == 0) return false;
+        foreach (var bs in NonRumourSkeletons)
+        {
+            if (bs.Length == 0) continue;
+            int dist = ScanEngine.Levenshtein(skel, bs);
+            double score = 1.0 - (double)dist / Math.Max(skel.Length, bs.Length);
+            if (score >= BoilerplateSkeletonThreshold) return true;
         }
         return false;
     }

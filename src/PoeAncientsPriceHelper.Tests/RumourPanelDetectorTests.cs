@@ -49,6 +49,29 @@ public class RumourPanelDetectorTests
     }
 
     [Fact]
+    public void Detect_GarbledTitle_NotTreatedAsRumourRow()
+    {
+        // "UNCHARTED WATERS" is recognised as the header, but the "ISLAND RUMOURS" title is OCR-garbled
+        // below the fuzzy signature threshold so it isn't caught as a header — it must still be excluded
+        // from the rumour rows (it used to surface as a stray "unknown rumour").
+        List<OcrTextLine> lines =
+        [
+            Line("UNCHARTED WATERS", 1000, 100, 220, 30),
+            Line("Islawd Rnnonrs", 1010, 150, 200, 26),   // garbled "ISLAND RUMOURS" in the name band
+            Line("Endless cliffs...", 1015, 190),
+            Line("Unknown ruins...", 1015, 222),
+            Line("Requires:", 1015, 262),
+            Line("Expedition Logbook", 1015, 288),
+        ];
+
+        var panel = RumourPanelDetector.Detect(lines);
+        Assert.NotNull(panel);
+        Assert.Equal(
+            new[] { "Endless cliffs...", "Unknown ruins..." },
+            panel!.RumourLines.Select(l => l.Text).ToArray());
+    }
+
+    [Fact]
     public void Detect_NoSignature_ReturnsNull()
     {
         List<OcrTextLine> lines =

@@ -1,4 +1,3 @@
-using System.Text;
 using Newtonsoft.Json;
 
 namespace PoeAncientsPriceHelper;
@@ -46,7 +45,7 @@ internal sealed class RumourRepository
                 _byKey[key] = entry;   // last definition wins, like the price dictionary
         }
         _keysByLength = _byKey.Keys.GroupBy(k => k.Length).ToDictionary(g => g.Key, g => g.ToList());
-        _skeletons = _byKey.Keys.Select(k => (Skeleton(k), k)).ToList();
+        _skeletons = _byKey.Keys.Select(k => (NameNormalizer.Skeleton(k), k)).ToList();
     }
 
     public static RumourRepository FromJson(string json)
@@ -127,7 +126,7 @@ internal sealed class RumourRepository
         // "uwkwoww miws"). Collapse the confusable glyph classes to a skeleton and match on that.
         if (name.Length >= MinSkeletonLength)
         {
-            var skel = Skeleton(name);
+            var skel = NameNormalizer.Skeleton(name);
             string? best = null;
             double bestScore = SkeletonThreshold;   // must strictly exceed to win
             foreach (var (sk, key) in _skeletons)
@@ -140,24 +139,6 @@ internal sealed class RumourRepository
         }
 
         return null;
-    }
-
-    // Collapse glyphs the rumour-panel font/OCR confuses into canonical classes, so a systematically
-    // garbled read still lines up with the true key. Input is an already-normalized name.
-    private static string Skeleton(string normalized)
-    {
-        var sb = new StringBuilder(normalized.Length);
-        foreach (char c in normalized)
-            sb.Append(c switch
-            {
-                'w' or 'm' or 'n' or 'u' => 'n',
-                'r' or 'v' => 'r',
-                'i' or 'l' or 'j' or 't' => 'i',
-                'o' or '0' or 'e' or 'c' => 'o',
-                '4' or 'a' => 'a',
-                _ => c,
-            });
-        return sb.ToString();
     }
 
     // Closest key to the OCR name by Levenshtein similarity, or null if nothing clears the
