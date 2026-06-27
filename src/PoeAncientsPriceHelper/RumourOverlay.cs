@@ -186,18 +186,21 @@ internal sealed class RumourOverlayForm : Form
         int nameW = 0, detailW = 0, ratingW = 0, rowH = 0;
         foreach (var row in _rows)
         {
-            var name = row.OcrName;
-            string detail, rating;
+            // Show the MATCHED rumour name (what the program resolved to) so the map/mods/rating can be
+            // sanity-checked against the real rumour. The raw OCR read is only surfaced under --debug.
+            string name, detail, rating;
             Color ratingColor;
             if (row.Entry is { } e)
             {
+                name = App.DebugMode ? $"{e.Rumor}  <- {row.OcrName}" : e.Rumor;
                 detail = string.IsNullOrEmpty(e.MapType) ? e.Mods : $"{e.MapType}  ·  {e.Mods}";
                 rating = e.Rating;
                 ratingColor = RumourRating.Color(RumourRating.Tier(e.Rating));
             }
             else
             {
-                detail = "unknown rumour";
+                name = App.DebugMode ? $"unknown  <- {row.OcrName}" : "unknown rumour";
+                detail = "";
                 rating = "?";
                 ratingColor = RumourRating.Color(RatingTier.Unknown);
             }
