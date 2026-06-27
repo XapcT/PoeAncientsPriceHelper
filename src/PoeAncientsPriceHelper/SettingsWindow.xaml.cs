@@ -110,6 +110,22 @@ public partial class SettingsWindow : Window
         ConfigStore.Save(_config);
     }
 
+    // The community spreadsheet the rumour ratings come from (public read-only view).
+    private const string RumourSheetUrl =
+        "https://docs.google.com/spreadsheets/d/16YU8mSS7TdLPdmOunVjiPn_NrKVGfcnMkuMQDy8jgZA/htmlview";
+
+    private void RumourSourceButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(RumourSheetUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Settings] open data source failed: {ex.Message}");
+        }
+    }
+
     // Pull the latest rumour data from the sheet on demand; the callback caches it and swaps it into
     // the running scanner. Any failure falls back to the current data and is surfaced in the status line.
     private async void RefreshRumoursButton_Click(object sender, RoutedEventArgs e)

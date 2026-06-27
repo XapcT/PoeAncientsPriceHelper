@@ -1,7 +1,7 @@
 <Window x:Class="PoeAncientsPriceHelper.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="560" Width="380"
+        Title="Settings" Height="620" Width="380"
         Icon="app.ico"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -120,10 +120,13 @@
                    Text="Only applies once a region is calibrated. Just open the app and it starts in the tray."
                    Foreground="#666" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/>
 
-        <CheckBox Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" x:Name="RumourEnabledBox"
-                  Margin="0,14,0,0" Foreground="#CCC" FontSize="12"
-                  Content="Enable Island Rumour helper (auto-detect on the Atlas map)"
-                  Checked="RumourEnabledBox_Changed" Unchecked="RumourEnabledBox_Changed"/>
+        <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Vertical" Margin="0,14,0,0">
+            <CheckBox x:Name="RumourEnabledBox" Foreground="#CCC" FontSize="12"
+                      Content="Enable Island Rumour helper (experimental)"
+                      Checked="RumourEnabledBox_Changed" Unchecked="RumourEnabledBox_Changed"/>
+            <TextBlock Foreground="#888" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"
+                       Text="Experimental: auto-detects the Atlas rumour panel and shows ratings from a community spreadsheet. OCR can misread names and some rumours may be missing."/>
+        </StackPanel>
 
         <TextBlock Grid.Row="9" Grid.Column="0" Text="Rumour scan rate:" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
         <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Vertical" Margin="0,4">
@@ -136,6 +139,9 @@
             <Button x:Name="RefreshRumoursButton" Content="Refresh rumour data from sheet"
                     Style="{StaticResource FlatButton}" Background="#2A2A2A" Foreground="#CCC" BorderBrush="#444"
                     FontSize="11" HorizontalAlignment="Left" Padding="10,4" Click="RefreshRumoursButton_Click"/>
+            <Button x:Name="RumourSourceButton" Content="Open the data spreadsheet (community-maintained)"
+                    Style="{StaticResource FlatButton}" Background="#2A2A2A" Foreground="#CCC" BorderBrush="#444"
+                    FontSize="11" HorizontalAlignment="Left" Padding="10,4" Margin="0,6,0,0" Click="RumourSourceButton_Click"/>
             <TextBlock x:Name="RumourRefreshStatus" Text="" Foreground="#888" FontSize="10"
                        Margin="0,4,0,0" TextWrapping="Wrap"/>
         </StackPanel>
