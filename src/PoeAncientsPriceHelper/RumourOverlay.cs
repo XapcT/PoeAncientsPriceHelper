@@ -75,13 +75,17 @@ internal sealed class RumourOverlayForm : Form
     private readonly Font _nameFont = new("Segoe UI", 14, FontStyle.Bold);
     private readonly Font _detailFont = new("Segoe UI", 12, FontStyle.Regular);
     private readonly Font _ratingFont = new("Segoe UI", 15, FontStyle.Bold);
+    private readonly Font _headerFont = new("Segoe UI", 10, FontStyle.Bold);
     private Bitmap? _buffer;
+
+    private static readonly string[] Headers = ["Rumour", "Map", "Mods", "Rating"];
 
     private const int Gap = 16;       // gap between panel and overlay
     private const int PadX = 12;
     private const int PadY = 10;
     private const int RowGap = 6;
-    private const int ColGap = 12;    // gap between name/detail/rating columns
+    private const int ColGap = 16;    // gap between columns
+    private const int HeaderGap = 8;  // gap below the header row / separator
 
     public RumourOverlayForm(Rectangle screenBounds)
     {
@@ -181,39 +185,41 @@ internal sealed class RumourOverlayForm : Form
         g.TranslateTransform(-Bounds.Left, -Bounds.Top);
         if (_rows.Count == 0) return;
 
-        // Measure each row's three columns so the block can be sized and the rating right-aligned.
-        var measured = new List<(string Name, string Detail, string Rating, Color RatingColor)>(_rows.Count);
-        int nameW = 0, detailW = 0, ratingW = 0, rowH = 0;
+        // Build the four display columns per row. Show the MATCHED rumour name (what the program
+        // resolved to) so the map/mods/rating can be sanity-checked against the real rumour; the raw OCR
+        // read is only surfaced under --debug.
+        var rows = new List<(string Name, string Map, string Mods, string Rating, Color RatingColor)>(_rows.Count);
         foreach (var row in _rows)
         {
-            // Show the MATCHED rumour name (what the program resolved to) so the map/mods/rating can be
-            // sanity-checked against the real rumour. The raw OCR read is only surfaced under --debug.
-            string name, detail, rating;
-            Color ratingColor;
             if (row.Entry is { } e)
-            {
-                name = App.DebugMode ? $"{e.Rumor}  <- {row.OcrName}" : e.Rumor;
-                detail = string.IsNullOrEmpty(e.MapType) ? e.Mods : $"{e.MapType}  ·  {e.Mods}";
-                rating = e.Rating;
-                ratingColor = RumourRating.Color(RumourRating.Tier(e.Rating));
-            }
+                rows.Add((
+                    App.DebugMode ? $"{e.Rumor}  <- {row.OcrName}" : e.Rumor,
+                    e.MapType, e.Mods, e.Rating,
+                    RumourRating.Color(RumourRating.Tier(e.Rating))));
             else
-            {
-                name = App.DebugMode ? $"unknown  <- {row.OcrName}" : "unknown rumour";
-                detail = "";
-                rating = "?";
-                ratingColor = RumourRating.Color(RatingTier.Unknown);
-            }
-            measured.Add((name, detail, rating, ratingColor));
-            nameW = Math.Max(nameW, Measure(g, name, _nameFont));
-            detailW = Math.Max(detailW, Measure(g, detail, _detailFont));
-            ratingW = Math.Max(ratingW, Measure(g, rating, _ratingFont));
-            rowH = Math.Max(rowH, Math.Max(_nameFont.Height, _ratingFont.Height));
+                rows.Add((
+                    App.DebugMode ? $"unknown  <- {row.OcrName}" : "unknown rumour",
+                    "", "", "?",
+                    RumourRating.Color(RatingTier.Unknown)));
         }
 
-        int contentW = nameW + ColGap + detailW + ColGap + ratingW;
-        int blockW = PadX * 2 + contentW;
-        int blockH = PadY * 2 + measured.Count * rowH + (measured.Count - 1) * RowGap;
+        // Column widths = max of the header label and every row's cell.
+        int nameW = Measure(g, Headers[0], _headerFont);
+        int mapW = Measure(g, Headers[1], _headerFont);
+        int modsW = Measure(g, Headers[2], _headerFont);
+        int ratingW = Measure(g, Headers[3], _headerFont);
+        foreach (var (name, map, mods, rating, _) in rows)
+        {
+            nameW = Math.Max(nameW, Measure(g, name, _nameFont));
+            mapW = Math.Max(mapW, Measure(g, map, _detailFont));
+            modsW = Math.Max(modsW, Measure(g, mods, _detailFont));
+            ratingW = Math.Max(ratingW, Measure(g, rating, _ratingFont));
+        }
+
+        int rowH = Math.Max(_nameFont.Height, _ratingFont.Height);
+        int headerH = _headerFont.Height;
+        int blockW = PadX * 2 + nameW + ColGap + mapW + ColGap + modsW + ColGap + ratingW;
+        int blockH = PadY * 2 + headerH + HeaderGap + rows.Count * rowH + (rows.Count - 1) * RowGap;
 
         var pos = RumourOverlayLayout.Position(_panelBounds, new Size(blockW, blockH), _screenBounds, Gap);
         var block = new Rectangle(pos.X, pos.Y, blockW, blockH);
@@ -228,18 +234,34 @@ internal sealed class RumourOverlayForm : Form
         }
 
         int nameX = block.Left + PadX;
-        int detailX = nameX + nameW + ColGap;
-        int ratingRight = block.Right - PadX;
+        int mapX = nameX + nameW + ColGap;
+        int modsX = mapX + mapW + ColGap;
+        int ratingX = modsX + modsW + ColGap;
+
+        // Header row + separator line.
         int y = block.Top + PadY;
+        using (var headerBrush = new SolidBrush(Color.FromArgb(150, 155, 165)))
+        {
+            g.DrawString(Headers[0], _headerFont, headerBrush, nameX, y);
+            g.DrawString(Headers[1], _headerFont, headerBrush, mapX, y);
+            g.DrawString(Headers[2], _headerFont, headerBrush, modsX, y);
+            g.DrawString(Headers[3], _headerFont, headerBrush, ratingX, y);
+        }
+        int sepY = y + headerH + HeaderGap / 2;
+        using (var sepPen = new Pen(Color.FromArgb(90, 95, 110), 1))
+            g.DrawLine(sepPen, block.Left + PadX, sepY, block.Right - PadX, sepY);
+
+        y += headerH + HeaderGap;
         using var nameBrush = new SolidBrush(Color.White);
-        using var detailBrush = new SolidBrush(Color.FromArgb(190, 190, 195));
-        foreach (var (name, detail, rating, ratingColor) in measured)
+        using var detailBrush = new SolidBrush(Color.FromArgb(195, 195, 200));
+        int dy = (_nameFont.Height - _detailFont.Height) / 2;
+        foreach (var (name, map, mods, rating, ratingColor) in rows)
         {
             g.DrawString(name, _nameFont, nameBrush, nameX, y);
-            g.DrawString(detail, _detailFont, detailBrush, detailX, y + (_nameFont.Height - _detailFont.Height) / 2);
-            int rW = Measure(g, rating, _ratingFont);
+            g.DrawString(map, _detailFont, detailBrush, mapX, y + dy);
+            g.DrawString(mods, _detailFont, detailBrush, modsX, y + dy);
             using (var ratingBrush = new SolidBrush(ratingColor))
-                g.DrawString(rating, _ratingFont, ratingBrush, ratingRight - rW, y);
+                g.DrawString(rating, _ratingFont, ratingBrush, ratingX, y);
             y += rowH + RowGap;
         }
     }
@@ -271,7 +293,7 @@ internal sealed class RumourOverlayForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _nameFont.Dispose(); _detailFont.Dispose(); _ratingFont.Dispose(); _buffer?.Dispose(); }
+        if (disposing) { _nameFont.Dispose(); _detailFont.Dispose(); _ratingFont.Dispose(); _headerFont.Dispose(); _buffer?.Dispose(); }
         base.Dispose(disposing);
     }
 
