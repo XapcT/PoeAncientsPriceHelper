@@ -93,10 +93,8 @@ internal sealed class ScanEngine : IDisposable
         IReadOnlyList<PriceRow> lastPushedRows = [];
         bool lastPushedConfirmed = false;
         bool lastPushedReading = false;
-        // Short-lived per-item stack memory: name → (multiplier, expiry). OCR can drop the leading
-        // "Nx" marker on a stack for a frame or two; this keeps a known stack's multiplier alive so
-        // the price label doesn't oscillate between unit-only and total(each). (See MergeReads.)
-        var quantityMemory = new Dictionary<string, (int Multiplier, DateTime ExpiresUtc)>(StringComparer.Ordinal);
+        // Stack memory is now per-row, held on each RowSlot (see MergeReads), so a dropped "Nx" marker
+        // on one row can't bleed its multiplier onto another row of the same item.
         int topmostCounter = 0;
         const int TopmostEveryN = 10;
         bool isOpen = false;          // brightness gate: bright enough to attempt OCR
@@ -176,7 +174,6 @@ internal sealed class ScanEngine : IDisposable
 
                     isOpen = false; confirmedOpen = false; brightStreak = 0; darkStreak = 0;
                     slots.Clear(); lastRows = [];
-                    quantityMemory.Clear();
                     staleCount = 0;
                     noPriceStreak = 0;
                     _showing = false;
@@ -334,7 +331,7 @@ internal sealed class ScanEngine : IDisposable
                                     noPriceStreak++;
                                 }
 
-                                lastRows = MergeReads(slots, reads, quantityMemory, now);
+                                lastRows = MergeReads(slots, reads, now, Log);
                             }
 
                             // Lost-panel reset (brightness-independent): a panel we'd CONFIRMED that
@@ -349,7 +346,6 @@ internal sealed class ScanEngine : IDisposable
                             {
                                 Log($"confirmed panel lost priced rows for {noPriceStreak} passes — clearing slots");
                                 slots.Clear();
-                                quantityMemory.Clear();
                                 lastRows = [];
                                 confirmedOpen = false;
                                 suppressHintUntilConfirm = true;
@@ -361,7 +357,6 @@ internal sealed class ScanEngine : IDisposable
                     {
                         slots.Clear();
                         lastRows = [];
-                        quantityMemory.Clear();
                         confirmedOpen = false;
                         staleCount = 0;
                         noPriceStreak = 0;
@@ -622,7 +617,7 @@ internal sealed class ScanEngine : IDisposable
     // is read on two consecutive passes, then stays fixed (noise can't dislodge it). Rows that
     // are still unpriced keep showing the latest attempt and get re-read every pass, so an early
     // misread no longer freezes a row — a later correct read upgrades it.
-    private sealed class RowSlot
+    internal sealed class RowSlot
     {
         public int Y;                    // stable display position (first-seen)
         public PriceRow Latest = null!;  // most recent read (shown, as unpriced, until locked)
@@ -631,24 +626,24 @@ internal sealed class ScanEngine : IDisposable
         public string? PendingName;      // candidate price name awaiting a second confirming read
         public int PendingCount;
         public int Unseen;               // consecutive passes this slot wasn't matched
+        // Per-row stack memory: the last stack size seen on THIS slot, kept briefly so a frame where
+        // OCR drops the "Nx" marker doesn't flicker the price back to unit-only. Scoped to the slot
+        // (a screen position), NOT the item name — so two rows of the SAME item at different stack
+        // sizes (e.g. "2x" and "1x" of the same currency) can't cross-contaminate each other.
+        public int RememberedMultiplier = 1;
+        public DateTime RememberedExpiresUtc;
     }
 
-    private IReadOnlyList<PriceRow> MergeReads(
+    internal static IReadOnlyList<PriceRow> MergeReads(
         List<RowSlot> slots,
         IReadOnlyList<PriceRow> reads,
-        Dictionary<string, (int Multiplier, DateTime ExpiresUtc)> quantityMemory,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        Action<string>? log = null)
     {
         const int Tolerance = 20;   // px: how far a read can move and still be the same row
         const int Confirm = 2;      // matching fuzzy/prefix reads before a row locks (exact: 1)
         const int EvictAfter = 3;   // passes a slot can go unmatched before it's dropped
         const int QuantityMemoryMs = 1500;  // how long a seen stack multiplier survives an Nx dropout
-
-        // Drop expired memory so a long-gone stack can't resurrect a multiplier on a same-named item.
-        foreach (var stale in quantityMemory.Where(kv => kv.Value.ExpiresUtc <= nowUtc)
-                                            .Select(kv => kv.Key)
-                                            .ToList())
-            quantityMemory.Remove(stale);
 
         // Panel-switch detection: the user opened a different panel without the overlay closing.
         // Locked rows are otherwise sticky (a miss never unlocks them), so they'd keep showing the
@@ -668,7 +663,7 @@ internal sealed class ScanEngine : IDisposable
         {
             foreach (var s in changedSlots)
                 slots.Remove(s);
-            Log($"panel switch detected ({changedSlots.Count} rows changed) — resetting changed slots only");
+            log?.Invoke($"panel switch detected ({changedSlots.Count} rows changed) — resetting changed slots only");
         }
 
         var matched = new HashSet<RowSlot>();
@@ -702,12 +697,12 @@ internal sealed class ScanEngine : IDisposable
                 if (slot.PendingCount >= needed)
                 {
                     if (!slot.Locked || slot.LockedRow.Name != read.Name)
-                        Log($"locked y={slot.Y} '{read.Name}'");
+                        log?.Invoke($"locked y={slot.Y} '{read.Name}'");
 
                     // Stack stickiness: an explicitly-read Nx always wins; otherwise a row that already
-                    // locked onto a stack, or saw one within the memory window, keeps that multiplier
-                    // through a pass where OCR drops the marker and reads a bare 1x.
-                    int remembered = RememberedMultiplier(quantityMemory, read.Name, nowUtc);
+                    // locked onto a stack, or saw one within the memory window on THIS slot, keeps that
+                    // multiplier through a pass where OCR drops the marker and reads a bare 1x.
+                    int remembered = slot.RememberedExpiresUtc > nowUtc ? slot.RememberedMultiplier : 1;
                     int priorLocked = slot.Locked && slot.LockedRow.Name == read.Name ? slot.LockedRow.Multiplier : 1;
                     int effectiveMultiplier = ResolveMultiplierForDisplay(
                         read.Multiplier, read.MultiplierExplicit, priorLocked, remembered);
@@ -716,10 +711,13 @@ internal sealed class ScanEngine : IDisposable
                     if (effectiveMultiplier > 1 && slot.Locked && slot.LockedRow.Name == read.Name)
                         effectiveExplicit = slot.LockedRow.MultiplierExplicit || read.MultiplierExplicit;
 
-                    // Refresh memory whenever we believe this row is a stack, so a one-pass dropout
-                    // keeps showing the stack total instead of flickering back to the unit price.
-                    if (!string.IsNullOrEmpty(read.Name) && effectiveMultiplier > 1)
-                        quantityMemory[read.Name] = (effectiveMultiplier, nowUtc.AddMilliseconds(QuantityMemoryMs));
+                    // Refresh THIS slot's memory whenever we believe the row is a stack, so a one-pass
+                    // dropout keeps showing the stack total instead of flickering back to the unit price.
+                    if (effectiveMultiplier > 1)
+                    {
+                        slot.RememberedMultiplier = effectiveMultiplier;
+                        slot.RememberedExpiresUtc = nowUtc.AddMilliseconds(QuantityMemoryMs);
+                    }
 
                     slot.Locked = true;
                     slot.LockedRow = read with
@@ -766,16 +764,6 @@ internal sealed class ScanEngine : IDisposable
         if (priorLockedMultiplier > 1) return priorLockedMultiplier;
         if (!readMultiplierExplicit && rememberedMultiplier > 1) return rememberedMultiplier;
         return readMultiplier;
-    }
-
-    private static int RememberedMultiplier(
-        Dictionary<string, (int Multiplier, DateTime ExpiresUtc)> quantityMemory,
-        string name,
-        DateTime nowUtc)
-    {
-        if (string.IsNullOrEmpty(name)) return 1;
-        if (!quantityMemory.TryGetValue(name, out var m) || m.ExpiresUtc <= nowUtc) return 1;
-        return Math.Max(1, m.Multiplier);
     }
 
     // F3-only diagnostic line: how many rows OCR produced, how many are priced, and how the priced
