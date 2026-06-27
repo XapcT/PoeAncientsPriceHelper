@@ -33,6 +33,14 @@
     <Resource Include="app.ico" />
   </ItemGroup>
 
+  <!-- Bundled Island Rumour snapshot, copied next to the exe. RumourRepository.LoadBundled reads it
+       from AppContext.BaseDirectory; the sheet-refresh path (#37) layers an updated copy on top. -->
+  <ItemGroup>
+    <Content Include="rumours.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <!-- Demote App.xaml from ApplicationDefinition (which would generate its own Main) to a Page, so
        Program.Main is the single entry point. App.InitializeComponent() still applies StartupUri /
        ShutdownMode / resources exactly as before. -->

@@ -24,4 +24,12 @@
     <ProjectReference Include="..\PoeAncientsPriceHelper\PoeAncientsPriceHelper.csproj" />
   </ItemGroup>
 
+  <!-- Mirror the bundled snapshot into the test output so RumourRepository.LoadBundled (which reads
+       AppContext.BaseDirectory) can be exercised end-to-end. -->
+  <ItemGroup>
+    <Content Include="..\PoeAncientsPriceHelper\rumours.json" Link="rumours.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
