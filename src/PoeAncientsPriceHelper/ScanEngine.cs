@@ -9,6 +9,7 @@ internal sealed class ScanEngine : IDisposable
     private readonly PriceRepository _prices;
     private readonly IconCache _icons;
     private readonly IScreenCaptureBackend _capture;
+    private readonly NameTranslator _translator;
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
     private Dictionary<string, int> _lastPositions = new();
@@ -36,12 +37,16 @@ internal sealed class ScanEngine : IDisposable
     // dismissed without flickering until the user closes the panel themselves).
     public static void RequestDismiss() => _dismissed = true;
 
-    public ScanEngine(AppConfig config, PriceRepository prices, IconCache icons, IScreenCaptureBackend capture)
+    public ScanEngine(AppConfig config, PriceRepository prices, IconCache icons, IScreenCaptureBackend capture,
+        NameTranslator? translator = null)
     {
         _config = config;
         _prices = prices;
         _icons = icons;
         _capture = capture;
+        // Localized-client support (#29): maps OCR'd non-English names → English price keys for the
+        // language picked in Settings (config.GameLanguage). "en" (default) loads nothing → no-op.
+        _translator = translator ?? NameTranslator.ForLanguage(config.GameLanguage);
     }
 
     public void Start()
@@ -426,11 +431,18 @@ internal sealed class ScanEngine : IDisposable
             if (row.NormalizedName.Contains("runeshape"))
                 continue;
 
+            // Localized clients (#29): map the OCR'd name to its English price key up front, then run
+            // the entire matcher (gem / easter-egg / exact / prefix / fuzzy) on the English `name`.
+            // On an English client (or any item with no translation) this returns the input unchanged,
+            // so everything below is byte-for-byte the original behaviour. Using the translated name as
+            // the row identity also stabilises positions when the localized OCR spelling jitters.
+            var name = _translator.Translate(row.NormalizedName);
+
             int stableY = row.CenterY;
-            if (_lastPositions.TryGetValue(row.NormalizedName, out int prevY) &&
+            if (_lastPositions.TryGetValue(name, out int prevY) &&
                 Math.Abs(prevY - row.CenterY) < 5)
                 stableY = prevY;
-            newPositions[row.NormalizedName] = stableY;
+            newPositions[name] = stableY;
 
             // Uncut gems (skill / spirit / support) are priced PER LEVEL, and adjacent levels differ
             // several-fold (e.g. spirit gem L18 ≈ 0.027 div vs L19 ≈ 0.143 div). The only things that
@@ -439,7 +451,7 @@ internal sealed class ScanEngine : IDisposable
             // slip on the digit (or skill↔spirit) would otherwise lock a confidently-wrong, multiples-off
             // price. If the type or level can't be read cleanly, the row shows '?' until a clean read
             // arrives — better than guessing a neighbouring level.
-            if (TryResolveGemKey(row.NormalizedName, out var gemKey))
+            if (TryResolveGemKey(name, out var gemKey))
             {
                 if (gemKey is not null && snapshot.TryGetValue(gemKey, out var gemEntry))
                 {
@@ -451,7 +463,7 @@ internal sealed class ScanEngine : IDisposable
                 }
                 else
                     // Recognised as an uncut gem but type+level didn't pin to a known price → '?', never fuzzy.
-                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, row.NormalizedName, MultiplierExplicit: row.MultiplierExplicit));
+                    rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, false, row.Multiplier, name, MultiplierExplicit: row.MultiplierExplicit));
                 continue;
             }
 
@@ -459,12 +471,12 @@ internal sealed class ScanEngine : IDisposable
             // ExactMatch=true so they lock on the first read like a real priced row.
             //   "5x random currency" (the "5x" is stripped into the multiplier, leaving "random
             //    currency") → Mirror of Kalandra. "unique belt" → Headhunter.
-            if (row.NormalizedName.Contains("random") && row.NormalizedName.Contains("currency"))
+            if (name.Contains("random") && name.Contains("currency"))
             {
                 rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "random currency", true, MemeKind.Mirror, row.MultiplierExplicit));
                 continue;
             }
-            if (row.NormalizedName.Contains("unique") && row.NormalizedName.Contains("belt"))
+            if (name.Contains("unique") && name.Contains("belt"))
             {
                 rows.Add(new PriceRow(stableY, row.RawText, 0m, 0m, true, row.Multiplier, "unique belt", true, MemeKind.Headhunter, row.MultiplierExplicit));
                 continue;
@@ -475,9 +487,9 @@ internal sealed class ScanEngine : IDisposable
             // key (not the noisy OCR text) is stored as the row Name so the same item locks even
             // when OCR jitters between passes.
             PriceEntry? entry;
-            string matchedKey = row.NormalizedName;
+            string matchedKey = name;
             bool exact = false;
-            if (_resolutionCache.TryGetValue(row.NormalizedName, out var cached))
+            if (_resolutionCache.TryGetValue(name, out var cached))
             {
                 // Reuse a previously resolved key (or a recorded miss). The same OCR'd names recur
                 // on every pass while a panel is open, so this skips the dict scan + Levenshtein
@@ -497,19 +509,19 @@ internal sealed class ScanEngine : IDisposable
             }
             else
             {
-                if (snapshot.TryGetValue(row.NormalizedName, out entry))
+                if (snapshot.TryGetValue(name, out entry))
                 {
                     exact = true;
                 }
-                else if (row.NormalizedName.Length >= 10 &&
-                         snapshot.Keys.Where(k => k.StartsWith(row.NormalizedName, StringComparison.Ordinal))
+                else if (name.Length >= 10 &&
+                         snapshot.Keys.Where(k => k.StartsWith(name, StringComparison.Ordinal))
                                       .MinBy(k => k.Length) is { } prefixKey)
                 {
                     entry = snapshot[prefixKey];
                     matchedKey = prefixKey;
                 }
-                else if (row.NormalizedName.Length >= 6 &&
-                         BestFuzzy(snapshot, snap.KeysByLength, row.NormalizedName) is { } fuzzy &&
+                else if (name.Length >= 6 &&
+                         BestFuzzy(snapshot, snap.KeysByLength, name) is { } fuzzy &&
                          snapshot.TryGetValue(fuzzy.Key, out entry))
                 {
                     matchedKey = fuzzy.Key;
@@ -520,7 +532,7 @@ internal sealed class ScanEngine : IDisposable
                     entry = null;
                 }
                 // Cache the resolution: the matched key, or null to record a miss.
-                _resolutionCache[row.NormalizedName] = entry != null ? (matchedKey, exact) : (null, false);
+                _resolutionCache[name] = entry != null ? (matchedKey, exact) : (null, false);
             }
 
             if (entry != null)

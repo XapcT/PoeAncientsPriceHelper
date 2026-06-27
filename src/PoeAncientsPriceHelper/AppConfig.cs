@@ -27,6 +27,10 @@ internal sealed class AppConfig
     public string CustomPricesPath { get; set; } = "custom_prices.json";
     // "GDI" forces legacy BitBlt; any other value uses WGC (GPU capture) with GDI fallback.
     public string CaptureBackend { get; set; } = "Auto";
+    // PoE 2 client language (#29). The locale code whose name map is loaded to translate OCR'd item
+    // names into the English keys poe.ninja prices by. "en" (default) loads no map — English client,
+    // identity pass-through. Other codes (de/pt/ru/sp, …) match a locales\<code>.json file.
+    public string GameLanguage { get; set; } = "en";
     // UI theme preset name. Default "Toxic" (dark green gradient).
     public string Theme { get; set; } = "Toxic";
     // When true (and a region is calibrated), launching the app auto-starts scanning and minimizes to

@@ -19,6 +19,33 @@ internal static class NameNormalizer
         return s.Trim();
     }
 
+    // Fold Latin diacritics to their ASCII base (ä→a, ß→ss, é→e, ñ→n, ç→c, …) so a localized name
+    // still matches when OCR drops or mangles the accent — a very common failure on the stylised
+    // panel font (e.g. "Chaossphäre" read as "chaossphare", "Große" as "grosse"). Cyrillic/Greek and
+    // other non-Latin scripts pass through untouched (their OCR either reads cleanly or not at all).
+    // Input should already be Normalize()d. Used by NameTranslator's localized→English matching.
+    public static string Fold(string normalized)
+    {
+        var sb = new StringBuilder(normalized.Length);
+        foreach (char c in normalized)
+        {
+            switch (c)
+            {
+                case 'ä': case 'à': case 'á': case 'â': case 'ã': case 'å': sb.Append('a'); break;
+                case 'ö': case 'ò': case 'ó': case 'ô': case 'õ': case 'ø': sb.Append('o'); break;
+                case 'ü': case 'ù': case 'ú': case 'û': sb.Append('u'); break;
+                case 'é': case 'è': case 'ê': case 'ë': sb.Append('e'); break;
+                case 'í': case 'ì': case 'î': case 'ï': sb.Append('i'); break;
+                case 'ñ': sb.Append('n'); break;
+                case 'ç': sb.Append('c'); break;
+                case 'ý': case 'ÿ': sb.Append('y'); break;
+                case 'ß': sb.Append("ss"); break;
+                default: sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
+    }
+
     // Collapse glyphs the stylised PoE panel font / Windows OCR confuse into canonical classes
     // (n/m/u→n, r/v→r, …), so a systematically garbled read still lines up with the true text. Used by
     // the rumour matcher (name → key) and the panel detector (excluding garbled boilerplate). Input

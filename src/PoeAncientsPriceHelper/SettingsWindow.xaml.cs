@@ -46,6 +46,18 @@ public partial class SettingsWindow : Window
         CaptureBox.Items.Add(new ComboBoxItem { Content = "Legacy (GDI)", Tag = "GDI" });
         CaptureBox.SelectedIndex = _config.CaptureBackend == "GDI" ? 1 : 0;
 
+        // Game language (#29): English (no translation) first, then every locale file the app found.
+        // Tag carries the code persisted to config.GameLanguage; the engine builds its translator from
+        // it on next start. Unknown saved code (e.g. a removed file) falls back to English for display.
+        LanguageBox.Items.Clear();
+        LanguageBox.Items.Add(new ComboBoxItem { Content = "English (default)", Tag = "en" });
+        foreach (var loc in NameTranslator.AvailableLocales())
+            LanguageBox.Items.Add(new ComboBoxItem { Content = loc.DisplayName, Tag = loc.Code });
+        var langItems = LanguageBox.Items.Cast<ComboBoxItem>().ToList();
+        LanguageBox.SelectedItem =
+            langItems.FirstOrDefault(i => string.Equals((string)i.Tag!, _config.GameLanguage, StringComparison.OrdinalIgnoreCase))
+            ?? langItems[0];
+
         AutoStartBox.IsChecked = _config.AutoStart;
 
         // Rumour helper (#36): on/off + scan rate presets. Tag carries the interval in ms persisted to
@@ -85,6 +97,13 @@ public partial class SettingsWindow : Window
         if (_loading || CaptureBox.SelectedItem is not ComboBoxItem { Tag: string value }) return;
         _config.CaptureBackend = value;
         ConfigStore.Save(_config);   // read by the engine the next time it starts
+    }
+
+    private void LanguageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || LanguageBox.SelectedItem is not ComboBoxItem { Tag: string code }) return;
+        _config.GameLanguage = code;
+        ConfigStore.Save(_config);   // the engine reads this to build its translator the next time it starts
     }
 
     private void AutoStartBox_Changed(object sender, RoutedEventArgs e)

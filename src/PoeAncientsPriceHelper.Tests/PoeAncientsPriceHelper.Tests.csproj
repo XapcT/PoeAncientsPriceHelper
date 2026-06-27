@@ -32,4 +32,12 @@
     </Content>
   </ItemGroup>
 
+  <!-- Mirror the bundled locale files so the translator's end-to-end load (AppContext.BaseDirectory\
+       locales) can be tested against the real shipped data. -->
+  <ItemGroup>
+    <Content Include="..\PoeAncientsPriceHelper\locales\*.json" Link="locales\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

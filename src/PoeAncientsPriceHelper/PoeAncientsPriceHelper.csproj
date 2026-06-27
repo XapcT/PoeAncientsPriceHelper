@@ -41,6 +41,15 @@
     </Content>
   </ItemGroup>
 
+  <!-- Localized item-name maps (#29): non-English PoE 2 clients OCR localized names that never match
+       the English-only poe.ninja price keys. NameTranslator loads these from AppContext.BaseDirectory\
+       locales\; users can drop extra/overriding files in %LocalAppData%\PoeAncientsPriceHelper\locales\. -->
+  <ItemGroup>
+    <Content Include="locales\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <!-- Demote App.xaml from ApplicationDefinition (which would generate its own Main) to a Page, so
        Program.Main is the single entry point. App.InitializeComponent() still applies StartupUri /
        ShutdownMode / resources exactly as before. -->
