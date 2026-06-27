@@ -6,6 +6,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-06-27
+
+### Added
+
+- **Auto-start.** Once a region is calibrated, opening the app now starts scanning and minimizes to the
+  tray automatically — just launch it and it runs, no Start or minimize click needed. Can be turned off
+  in the new Settings window. Skipped when launched in debug mode (the window and console stay visible).
+- **Settings window.** A gear button on the main window opens a dedicated Settings dialog, moving the
+  hotkey rebinds and theme picker off the main screen so it stays clean. It also exposes two options
+  that previously had no UI:
+  - **Capture mode** — choose between **Auto (GPU + fallback)** and **Legacy (GDI)**. If the overlay
+    doesn't appear or prices don't read on your setup, switching to Legacy (GDI) is worth a try. Applies
+    on the next start.
+  - **Auto-start** — the toggle described above.
+- **Diagnostics button.** A "Diagnostics" link restarts the app with logging enabled and writes
+  `scan_log.txt` / `debug_ocr.png` to the data folder for bug reports (replacing the old `debug.cmd`,
+  which no longer ships with the installer). When already running in debug mode it opens that folder.
+
+### Changed
+
+- **Resilient price fetching.** A fetch that comes back empty (poe.ninja down or blocking) no longer
+  wipes the prices you already have — the overlay keeps showing the last good set. The app retries every
+  30 seconds until prices return, then goes back to the normal 30-minute cycle. The status line now says
+  clearly when a fetch failed (red) or couldn't refresh but is still showing the last set (amber).
+
+### Fixed
+
+- **An all-empty price refresh no longer blanks the overlay.** Previously a single failed refresh could
+  overwrite working prices with nothing; the last good prices are now kept instead.
+
 ## [3.1.2] — 2026-06-27
 
 ### Fixed
