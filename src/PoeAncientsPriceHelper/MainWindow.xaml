@@ -71,16 +71,6 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Header: gear opens the Settings window (keybinds, theme, capture mode, auto-start). -->
-        <Button Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
-                x:Name="SettingsButton" Style="{StaticResource FlatButton}"
-                Content="⚙" FontSize="15"
-                HorizontalAlignment="Right" VerticalAlignment="Top"
-                Padding="8,2" Margin="0,0,0,4"
-                Background="#2A2A2A" Foreground="#CCC" BorderBrush="#444"
-                ToolTip="Settings — hotkeys, theme, capture mode, auto-start"
-                Click="SettingsButton_Click"/>
-
         <TextBlock Grid.Row="1" Grid.Column="0" Text="League:" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
         <ComboBox Grid.Row="1" Grid.Column="1" x:Name="LeagueBox" Margin="0,4" SelectionChanged="LeagueBox_SelectionChanged"/>
 
@@ -137,13 +127,23 @@
                    Cursor="Hand" Visibility="Collapsed" TextDecorations="Underline"
                    MouseLeftButtonUp="UpdateLink_Click"/>
 
-        <Button Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
-                x:Name="DonateButton" Style="{StaticResource FlatButton}"
-                Content="☕ Buy me a coffee"
-                HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                Padding="10,4" FontSize="11"
-                Background="#3A2A12" Foreground="#E0B060" BorderBrush="#7A5A20"
-                ToolTip="Support development via PayPal — thank you!"
-                Click="DonateButton_Click"/>
+        <!-- Settings (gear opens the Settings window: keybinds, theme, capture mode, auto-start)
+             sits just left of the donate button so both share the bottom-right corner at the same height. -->
+        <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Orientation="Horizontal">
+            <Button x:Name="SettingsButton" Style="{StaticResource FlatButton}"
+                    Content="⚙ Settings" FontSize="11"
+                    Padding="10,4" Margin="0,0,8,0"
+                    Background="#2A2A2A" Foreground="#CCC" BorderBrush="#444"
+                    ToolTip="Settings — hotkeys, theme, capture mode, auto-start"
+                    Click="SettingsButton_Click"/>
+            <Button x:Name="DonateButton" Style="{StaticResource FlatButton}"
+                    Content="☕ Buy me a coffee"
+                    Padding="10,4" FontSize="11"
+                    Background="#3A2A12" Foreground="#E0B060" BorderBrush="#7A5A20"
+                    ToolTip="Support development via PayPal — thank you!"
+                    Click="DonateButton_Click"/>
+        </StackPanel>
     </Grid>
 </Window>
