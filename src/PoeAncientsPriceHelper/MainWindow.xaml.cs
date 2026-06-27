@@ -248,7 +248,19 @@ public partial class MainWindow : Window
     // nothing needs syncing back here: theme is applied app-wide live, hotkey rebinds re-arm the hook,
     // and capture/auto-start are read straight from _config when next needed.
     private void SettingsButton_Click(object sender, RoutedEventArgs e) =>
-        new SettingsWindow(_config) { Owner = this }.ShowDialog();
+        new SettingsWindow(_config, RefreshRumourDataAsync) { Owner = this }.ShowDialog();
+
+    // "Refresh from sheet" (#37): pull the latest rumour CSV, cache it, and swap it into the running
+    // scanner so it applies live. On failure the existing data is kept; the result message is shown in
+    // Settings.
+    internal async Task<RumourRefreshResult> RefreshRumourDataAsync()
+    {
+        InitRumourHelper();
+        var result = await RumourRefresher.RefreshAsync(_http);
+        if (result is { Success: true, Repository: not null })
+            _rumourScanner!.UseData(result.Repository);
+        return result;
+    }
 
     private void UpdateRegionLabel()
     {
@@ -405,7 +417,7 @@ public partial class MainWindow : Window
     private void InitRumourHelper()
     {
         if (_rumourScanner is not null) return;
-        _rumours = RumourRepository.LoadBundled();
+        _rumours = RumourRepository.Load();   // refreshed cache if present, else bundled snapshot
         _rumourCapture = CreateCaptureBackend();
         _rumourScanner = new RumourScanner(_rumourCapture, new OcrScanner(), _rumours);
         _rumourEngine = new RumourScanEngine(_rumourScanner, RumourScreen,

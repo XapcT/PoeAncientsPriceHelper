@@ -15,12 +15,15 @@ namespace PoeAncientsPriceHelper;
 public partial class SettingsWindow : Window
 {
     private readonly AppConfig _config;
+    private readonly Func<Task<RumourRefreshResult>>? _refreshRumours;
     private bool _loading;
 
-    // internal: takes the internal AppConfig and is only ever constructed from MainWindow.
-    internal SettingsWindow(AppConfig config)
+    // internal: takes the internal AppConfig and is only ever constructed from MainWindow. The optional
+    // callback performs a rumour-sheet refresh (owned by MainWindow, which holds the scanner).
+    internal SettingsWindow(AppConfig config, Func<Task<RumourRefreshResult>>? refreshRumours = null)
     {
         _config = config;
+        _refreshRumours = refreshRumours;
         InitializeComponent();
         Populate();
     }
@@ -105,6 +108,28 @@ public partial class SettingsWindow : Window
         if (_loading || RumourIntervalBox.SelectedItem is not ComboBoxItem { Tag: int ms }) return;
         _config.RumourScanIntervalMs = RumourScanEngine.ClampInterval(ms);
         ConfigStore.Save(_config);
+    }
+
+    // Pull the latest rumour data from the sheet on demand; the callback caches it and swaps it into
+    // the running scanner. Any failure falls back to the current data and is surfaced in the status line.
+    private async void RefreshRumoursButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_refreshRumours is null) return;
+        RefreshRumoursButton.IsEnabled = false;
+        RumourRefreshStatus.Text = "Refreshing from sheet…";
+        try
+        {
+            var result = await _refreshRumours();
+            RumourRefreshStatus.Text = result.Message;
+        }
+        catch (Exception ex)
+        {
+            RumourRefreshStatus.Text = $"Refresh failed: {ex.Message}";
+        }
+        finally
+        {
+            RefreshRumoursButton.IsEnabled = true;
+        }
     }
 
     // ---- Hotkey rebinding (moved verbatim from MainWindow; one capture at a time) ----

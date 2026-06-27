@@ -47,6 +47,26 @@ internal sealed class RumourRepository
         return new RumourRepository(entries);
     }
 
+    // Where a sheet refresh (#37) caches its data, in the persistent data folder (survives updates).
+    public static string CachePath => Path.Combine(AppPaths.DataDir, "rumours_cache.json");
+
+    // Prefer a previously-refreshed cache if present, otherwise the bundled snapshot. `cacheFile` is
+    // injectable purely so tests can exercise the preference without touching the real data folder.
+    public static RumourRepository Load(string? cacheFile = null)
+    {
+        var path = cacheFile ?? CachePath;
+        try
+        {
+            if (File.Exists(path))
+                return FromJson(File.ReadAllText(path));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[RumourRepository] cache load failed: {ex.Message}");
+        }
+        return LoadBundled();
+    }
+
     // Load the snapshot shipped next to the exe (AppContext.BaseDirectory, copied via the csproj
     // Content item). Best-effort: a missing/corrupt file yields an empty repository rather than
     // throwing at startup — the overlay just shows "?" until data is available.

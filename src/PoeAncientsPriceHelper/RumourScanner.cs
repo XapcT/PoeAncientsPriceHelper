@@ -20,7 +20,9 @@ internal sealed class RumourScanner
 {
     private readonly IScreenCaptureBackend _capture;
     private readonly OcrScanner _ocr;
-    private readonly RumourRepository _rumours;
+    // Swappable so a sheet refresh (#37) takes effect live; volatile for the cross-thread read by the
+    // background loop.
+    private volatile RumourRepository _rumours;
     // Serialises capture+OCR so the auto-detect loop (#35) and the debug trigger (#34) can't drive the
     // shared capture backend concurrently.
     private readonly object _gate = new();
@@ -31,6 +33,9 @@ internal sealed class RumourScanner
         _ocr = ocr;
         _rumours = rumours;
     }
+
+    // Swap in a refreshed dataset (from a sheet refresh) without restarting the scan loop.
+    public void UseData(RumourRepository rumours) => _rumours = rumours;
 
     // Capture `region`, OCR it, and return the lines with bounds shifted into absolute screen coords
     // (so an overlay can be placed against them). Used both for the small WORLD-gate region and the
