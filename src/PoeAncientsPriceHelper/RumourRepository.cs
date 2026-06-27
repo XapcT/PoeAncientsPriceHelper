@@ -1,3 +1,4 @@
+using System.Text;
 using Newtonsoft.Json;
 
 namespace PoeAncientsPriceHelper;
@@ -23,9 +24,15 @@ internal sealed class RumourRepository
     // Below this length a name is too short to prefix-match safely (e.g. a 3-char fragment would
     // "start" half the table). Truncations we care about ("Cold", "Wild") are 4+.
     private const int MinPrefixLength = 4;
+    // Confusion-aware (skeleton) fallback. 0.72 cleanly separates true reads (measured 0.77–0.85 on
+    // badly-garbled names) from non-matches (≤0.41), and the bundled names have no skeleton collisions.
+    // Guarded to longer names — short boss names read fine and would risk a false skeleton match.
+    private const double SkeletonThreshold = 0.72;
+    private const int MinSkeletonLength = 8;
 
     private readonly Dictionary<string, RumourEntry> _byKey;        // normalized rumour name → entry
     private readonly Dictionary<int, List<string>> _keysByLength;   // length-bucketed keys for fuzzy
+    private readonly List<(string Skeleton, string Key)> _skeletons; // confusion-collapsed key → key
 
     public int Count => _byKey.Count;
 
@@ -39,6 +46,7 @@ internal sealed class RumourRepository
                 _byKey[key] = entry;   // last definition wins, like the price dictionary
         }
         _keysByLength = _byKey.Keys.GroupBy(k => k.Length).ToDictionary(g => g.Key, g => g.ToList());
+        _skeletons = _byKey.Keys.Select(k => (Skeleton(k), k)).ToList();
     }
 
     public static RumourRepository FromJson(string json)
@@ -112,7 +120,44 @@ internal sealed class RumourRepository
         }
 
         var fuzzy = BestFuzzy(name);
-        return fuzzy is not null ? _byKey[fuzzy] : null;
+        if (fuzzy is not null) return _byKey[fuzzy];
+
+        // Confusion-aware fallback: Windows OCR systematically misreads the stylised rumour-panel font
+        // (n/m/u→w, r→v, …), garbling names beyond what plain fuzzy can absorb ("unknown ruins" →
+        // "uwkwoww miws"). Collapse the confusable glyph classes to a skeleton and match on that.
+        if (name.Length >= MinSkeletonLength)
+        {
+            var skel = Skeleton(name);
+            string? best = null;
+            double bestScore = SkeletonThreshold;   // must strictly exceed to win
+            foreach (var (sk, key) in _skeletons)
+            {
+                int dist = ScanEngine.Levenshtein(skel, sk);
+                double score = 1.0 - (double)dist / Math.Max(skel.Length, sk.Length);
+                if (score > bestScore) { bestScore = score; best = key; }
+            }
+            if (best is not null) return _byKey[best];
+        }
+
+        return null;
+    }
+
+    // Collapse glyphs the rumour-panel font/OCR confuses into canonical classes, so a systematically
+    // garbled read still lines up with the true key. Input is an already-normalized name.
+    private static string Skeleton(string normalized)
+    {
+        var sb = new StringBuilder(normalized.Length);
+        foreach (char c in normalized)
+            sb.Append(c switch
+            {
+                'w' or 'm' or 'n' or 'u' => 'n',
+                'r' or 'v' => 'r',
+                'i' or 'l' or 'j' or 't' => 'i',
+                'o' or '0' or 'e' or 'c' => 'o',
+                '4' or 'a' => 'a',
+                _ => c,
+            });
+        return sb.ToString();
     }
 
     // Closest key to the OCR name by Levenshtein similarity, or null if nothing clears the

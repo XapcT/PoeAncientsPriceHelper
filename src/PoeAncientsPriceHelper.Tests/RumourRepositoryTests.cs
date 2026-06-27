@@ -69,6 +69,30 @@ public class RumourRepositoryTests
         Assert.Null(Bundled.Resolve(ocr));
     }
 
+    // Windows OCR systematically mangles the stylised rumour-panel font (n/m/u→w, r→v, the→doe). These
+    // are real reads from the game that plain fuzzy can't absorb; the confusion-aware skeleton fallback
+    // recovers them. (Strings captured from the OCR probe on the rumour screenshots.)
+    [Theory]
+    [InlineData("Uwkwww miws", "Unknown Ruins")]
+    [InlineData("Uhkwww miws", "Unknown Ruins")]
+    [InlineData("Ovi4iw of doe fall", "Origin of the Fall")]
+    public void Resolve_FontConfusion_RecoveredBySkeleton(string ocr, string expected)
+    {
+        var entry = Bundled.Resolve(ocr);
+        Assert.NotNull(entry);
+        Assert.Equal(expected, entry!.Rumor);
+    }
+
+    // The skeleton fallback must NOT manufacture matches: a rumour genuinely absent from the data, and a
+    // stray non-name line, both stay unmatched (measured well below the threshold).
+    [Theory]
+    [InlineData("Waww but riskv")]        // an in-game rumour with no sheet entry under this name
+    [InlineData("Rarity Rogue Exiles")]   // a mods line that leaked into the read
+    public void Resolve_SkeletonDoesNotFalseMatch(string ocr)
+    {
+        Assert.Null(Bundled.Resolve(ocr));
+    }
+
     // Rating tiers (and their parenthetical notes) are display strings preserved verbatim.
     [Theory]
     [InlineData("Unknown Ruins", "B (see notes)")]
