@@ -14,11 +14,12 @@ public partial class MainWindow : Window
     private PriceRepository? _repo;
     private IconCache? _icons;
     private ScanEngine? _engine;
-    // Rumour helper (#34): bundled data + a dedicated capture backend for one-shot full-screen reads.
-    // Lazily created on the first trigger so it costs nothing until used.
+    // Rumour helper: bundled data + a dedicated capture backend, plus the WORLD-gated auto-detect loop
+    // (#35). Created once on load; the loop runs in the background (idle off the Atlas map).
     private RumourRepository? _rumours;
     private RumourScanner? _rumourScanner;
     private IScreenCaptureBackend? _rumourCapture;
+    private RumourScanEngine? _rumourEngine;
     // 15s cap so a stalled poe.ninja/poecdn connection can't hang a whole fetch cycle for the
     // default 100s. Per-fetch cancellation (shutdown) is handled inside PriceRepository.
     // HTTP/2 + compression enabled for faster parallel fetches (5 concurrent requests multiplexed
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
             DiagnosticsLink.ToolTip = "Open the folder with scan_log.txt and debug_ocr.png";
         }
         await StartupAsync();
+        InitRumourHelper();
         // Auto-start QoL: with a calibrated region and the option enabled, begin scanning and drop
         // straight to the tray, so the user just opens the app and it runs (saving the Start + minimize
         // clicks). Skipped under --debug (keep the window and console visible for troubleshooting) and
@@ -397,18 +399,34 @@ public partial class MainWindow : Window
 
     private void CalibrateButton_Click(object sender, RoutedEventArgs e) => RunCalibration();
 
-    // Debug-only one-shot rumour read (#34 spine): capture the primary screen, detect the Island
-    // Rumours panel, resolve each rumour name, and show the ratings next to the panel. Wired to F8 via
-    // the App hook under --debug. The WORLD-gated auto-detect loop (#35) replaces this manual trigger.
-    // Capture + OCR run off the UI thread.
+    // Creates the rumour helper (bundled data + dedicated capture backend + scanner) and starts the
+    // WORLD-gated auto-detect loop (#35). Idempotent and independent of the price repo/icons, so it is
+    // created once on load and not torn down on a league change.
+    private void InitRumourHelper()
+    {
+        if (_rumourScanner is not null) return;
+        _rumours = RumourRepository.LoadBundled();
+        _rumourCapture = CreateCaptureBackend();
+        _rumourScanner = new RumourScanner(_rumourCapture, new OcrScanner(), _rumours);
+        _rumourEngine = new RumourScanEngine(_rumourScanner, RumourScreen);
+        _rumourEngine.Start();
+    }
+
+    // The screen the rumour loop watches: the monitor PoE runs on (derived from the calibrated price
+    // region when available), else the primary monitor.
+    private System.Drawing.Rectangle RumourScreen() =>
+        _config.IsCalibrated
+            ? System.Windows.Forms.Screen.FromRectangle(_config.RegionRect).Bounds
+            : (System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080));
+
+    // Debug-only one-shot rumour read (#34 spine): detect the Island Rumours panel now and show the
+    // ratings next to it. Wired to F8 via the App hook under --debug; the auto-detect loop (#35) is the
+    // real interaction. Capture + OCR run off the UI thread.
     internal void RunRumourScanOnce()
     {
-        _rumours ??= RumourRepository.LoadBundled();
-        _rumourCapture ??= CreateCaptureBackend();
-        var scanner = _rumourScanner ??= new RumourScanner(_rumourCapture, new OcrScanner(), _rumours);
-
-        var screen = System.Windows.Forms.Screen.PrimaryScreen?.Bounds
-                     ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+        InitRumourHelper();
+        var scanner = _rumourScanner!;
+        var screen = RumourScreen();
         Task.Run(() =>
         {
             try
@@ -514,6 +532,7 @@ public partial class MainWindow : Window
         _trayIcon?.Dispose();
         _engine?.StopAndWait(TimeSpan.FromSeconds(2));
         _engine?.Dispose();
+        _rumourEngine?.Dispose();
         RumourOverlayManager.Close();
         _rumourCapture?.Dispose();
         _repo?.Dispose();

@@ -66,6 +66,14 @@ public partial class App : System.Windows.Application
         ScanEngine.RequestDismiss();     // keep it hidden until the panel actually closes
     }
 
+    // ESC / Left-Ctrl+click also dismiss the rumour overlay: hide it now and latch it dismissed so the
+    // WORLD-gated loop keeps it hidden until the rumour panel actually closes (then it re-arms).
+    private static void DismissRumour()
+    {
+        RumourOverlayManager.HideNow();
+        RumourScanEngine.RequestDismiss();
+    }
+
     [DllImport("kernel32.dll")] private static extern bool AllocConsole();
     [DllImport("kernel32.dll")] private static extern bool AttachConsole(int dwProcessId);
 
@@ -103,7 +111,7 @@ public partial class App : System.Windows.Application
         {
             if (_capturing) return;   // rebind in progress: swallow keys from their normal actions
             // ESC closes the in-game panel — hide the overlay the instant the key goes down.
-            if (ev.Data.KeyCode == KeyCode.VcEscape) { DismissOverlay(); RumourOverlayManager.HideNow(); }
+            if (ev.Data.KeyCode == KeyCode.VcEscape) { DismissOverlay(); DismissRumour(); }
             else if (ev.Data.KeyCode is KeyCode.VcLeftControl) _leftCtrlDown = true;
         };
         _hook.KeyReleased += (_, ev) =>
@@ -123,7 +131,7 @@ public partial class App : System.Windows.Application
         _hook.MousePressed += (_, ev) =>
         {
             if (_capturing) return;
-            if (ev.Data.Button == MouseButton.Button1 && _leftCtrlDown) { DismissOverlay(); RumourOverlayManager.HideNow(); }
+            if (ev.Data.Button == MouseButton.Button1 && _leftCtrlDown) { DismissOverlay(); DismissRumour(); }
         };
         _ = _hook.RunAsync();
     }

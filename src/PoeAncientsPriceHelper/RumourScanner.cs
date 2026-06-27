@@ -21,6 +21,9 @@ internal sealed class RumourScanner
     private readonly IScreenCaptureBackend _capture;
     private readonly OcrScanner _ocr;
     private readonly RumourRepository _rumours;
+    // Serialises capture+OCR so the auto-detect loop (#35) and the debug trigger (#34) can't drive the
+    // shared capture backend concurrently.
+    private readonly object _gate = new();
 
     public RumourScanner(IScreenCaptureBackend capture, OcrScanner ocr, RumourRepository rumours)
     {
@@ -29,18 +32,23 @@ internal sealed class RumourScanner
         _rumours = rumours;
     }
 
-    // Capture `screen`, OCR it, and build the result. Returns null when no rumour panel is found.
-    public RumourReadResult? ReadOnce(Rectangle screen)
+    // Capture `region`, OCR it, and return the lines with bounds shifted into absolute screen coords
+    // (so an overlay can be placed against them). Used both for the small WORLD-gate region and the
+    // full screen.
+    public IReadOnlyList<OcrTextLine> CaptureLines(Rectangle region)
     {
-        using var bmp = _capture.CaptureRegion(screen);
-        var lines = _ocr.RecognizeLines(bmp);
-        // OCR boxes are bitmap-relative; shift them into absolute screen coords so the overlay can be
-        // placed against the panel.
-        var shifted = lines
-            .Select(l => l with { Bounds = Offset(l.Bounds, screen.Location) })
-            .ToList();
-        return BuildResult(shifted, _rumours);
+        lock (_gate)
+        {
+            using var bmp = _capture.CaptureRegion(region);
+            var lines = _ocr.RecognizeLines(bmp);
+            return lines
+                .Select(l => l with { Bounds = Offset(l.Bounds, region.Location) })
+                .ToList();
+        }
     }
+
+    // Capture `screen`, detect the panel, and resolve each rumour. Returns null when no panel is found.
+    public RumourReadResult? ReadOnce(Rectangle screen) => BuildResult(CaptureLines(screen), _rumours);
 
     // Pure detect + resolve over absolute-coord OCR lines. Returns null when no panel is detected.
     public static RumourReadResult? BuildResult(IReadOnlyList<OcrTextLine> lines, RumourRepository rumours)
