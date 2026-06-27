@@ -11,6 +11,8 @@ internal sealed class RumourScanEngine : IDisposable
 {
     private readonly RumourScanner _scanner;
     private readonly Func<Rectangle> _screen;
+    private readonly Func<bool> _enabled;
+    private readonly Func<int> _intervalMs;
     private CancellationTokenSource? _cts;
     private Task? _loop;
 
@@ -22,15 +24,21 @@ internal sealed class RumourScanEngine : IDisposable
     public static void RequestDismiss() => _dismissed = true;
 
     private const int GateIntervalMs = 1000;   // ~1 Hz WORLD-gate check (cheap, small region)
-    private const int ScanIntervalMs = 1800;   // full-screen detect throttle while on the map
     private const int TickMs = 150;            // loop granularity; the work is timestamp-throttled
     private const int HideAfterMisses = 2;     // signature-gone passes before hiding the overlay
+    // Sane bounds for the user-configurable full-screen scan interval (#36).
+    private const int MinIntervalMs = 500;
+    private const int MaxIntervalMs = 10000;
 
-    public RumourScanEngine(RumourScanner scanner, Func<Rectangle> screen)
+    public RumourScanEngine(RumourScanner scanner, Func<Rectangle> screen, Func<bool> enabled, Func<int> intervalMs)
     {
         _scanner = scanner;
         _screen = screen;
+        _enabled = enabled;
+        _intervalMs = intervalMs;
     }
+
+    public static int ClampInterval(int ms) => Math.Clamp(ms, MinIntervalMs, MaxIntervalMs);
 
     public bool IsRunning => _loop is { IsCompleted: false };
 
@@ -62,6 +70,16 @@ internal sealed class RumourScanEngine : IDisposable
         {
             try
             {
+                if (!_enabled())
+                {
+                    // Feature off (#36): fully idle — no gate, no OCR. Reset so re-enabling starts fresh.
+                    HideOverlay();
+                    onMap = false;
+                    missStreak = 0;
+                    try { await Task.Delay(TickMs, ct); } catch (OperationCanceledException) { break; }
+                    continue;
+                }
+
                 var now = DateTime.UtcNow;
                 var screen = _screen();
 
@@ -82,7 +100,7 @@ internal sealed class RumourScanEngine : IDisposable
                 }
 
                 // Full-screen detect (throttled) only while on the map.
-                if (onMap && (now - lastScan).TotalMilliseconds >= ScanIntervalMs)
+                if (onMap && (now - lastScan).TotalMilliseconds >= ClampInterval(_intervalMs()))
                 {
                     lastScan = now;
                     var result = _scanner.ReadOnce(screen);

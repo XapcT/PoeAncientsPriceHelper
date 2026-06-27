@@ -408,7 +408,8 @@ public partial class MainWindow : Window
         _rumours = RumourRepository.LoadBundled();
         _rumourCapture = CreateCaptureBackend();
         _rumourScanner = new RumourScanner(_rumourCapture, new OcrScanner(), _rumours);
-        _rumourEngine = new RumourScanEngine(_rumourScanner, RumourScreen);
+        _rumourEngine = new RumourScanEngine(_rumourScanner, RumourScreen,
+            () => _config.RumourHelperEnabled, () => _config.RumourScanIntervalMs);
         _rumourEngine.Start();
     }
 

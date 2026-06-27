@@ -34,6 +34,13 @@ internal sealed class AppConfig
     // Skipped under --debug so a troubleshooting session keeps the window and console visible.
     public bool AutoStart { get; set; } = true;
 
+    // Island Rumour helper (#36). Enabled by default; when off, the WORLD-gated auto-detect loop is
+    // fully idle (no gate check, no OCR). Missing in older configs → the initializer keeps these
+    // defaults (Newtonsoft only overwrites keys present in the file), exactly like AutoStart above.
+    public bool RumourHelperEnabled { get; set; } = true;
+    // How often the full-screen rumour detect runs WHILE on the Atlas map (ms). Clamped on use.
+    public int RumourScanIntervalMs { get; set; } = 1800;
+
     public Rectangle RegionRect
     {
         get => new(RegionX, RegionY, RegionWidth, RegionHeight);

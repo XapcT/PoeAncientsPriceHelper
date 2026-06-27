@@ -45,6 +45,19 @@ public partial class SettingsWindow : Window
 
         AutoStartBox.IsChecked = _config.AutoStart;
 
+        // Rumour helper (#36): on/off + scan rate presets. Tag carries the interval in ms persisted to
+        // config.RumourScanIntervalMs. If the saved value isn't a preset, fall back to Normal for display
+        // (the stored value is left untouched until the user picks one).
+        RumourEnabledBox.IsChecked = _config.RumourHelperEnabled;
+        RumourIntervalBox.Items.Clear();
+        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Fast (1.2s)", Tag = 1200 });
+        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Normal (1.8s)", Tag = 1800 });
+        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Relaxed (3s)", Tag = 3000 });
+        var items = RumourIntervalBox.Items.Cast<ComboBoxItem>().ToList();
+        RumourIntervalBox.SelectedItem =
+            items.FirstOrDefault(i => (int)i.Tag! == _config.RumourScanIntervalMs)
+            ?? items.First(i => (int)i.Tag! == 1800);
+
         _loading = false;
     }
 
@@ -75,6 +88,22 @@ public partial class SettingsWindow : Window
     {
         if (_loading) return;
         _config.AutoStart = AutoStartBox.IsChecked == true;
+        ConfigStore.Save(_config);
+    }
+
+    // The rumour engine reads these straight off _config each loop tick, so toggling on/off or changing
+    // the scan rate takes effect within a tick — no restart needed.
+    private void RumourEnabledBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        _config.RumourHelperEnabled = RumourEnabledBox.IsChecked == true;
+        ConfigStore.Save(_config);
+    }
+
+    private void RumourIntervalBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || RumourIntervalBox.SelectedItem is not ComboBoxItem { Tag: int ms }) return;
+        _config.RumourScanIntervalMs = RumourScanEngine.ClampInterval(ms);
         ConfigStore.Save(_config);
     }
 
