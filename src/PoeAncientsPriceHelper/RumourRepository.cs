@@ -28,6 +28,12 @@ internal sealed class RumourRepository
     // Guarded to longer names — short boss names read fine and would risk a false skeleton match.
     private const double SkeletonThreshold = 0.72;
     private const int MinSkeletonLength = 8;
+    // Lower-confidence skeleton tier: a catastrophically-garbled read (e.g. "Something Fishy" →
+    // "Sow10viw' fishzo", which only skeletons to 0.60) still resolves IF it's an unambiguous clear
+    // winner — at least this similar AND this far ahead of the runner-up. The margin is what keeps
+    // ambiguous garbage out (a genuine non-match's top two skeletons sit within ~0.01 of each other).
+    private const double LowSkeletonFloor = 0.55;
+    private const double SkeletonMargin = 0.18;
 
     private readonly Dictionary<string, RumourEntry> _byKey;        // normalized rumour name → entry
     private readonly Dictionary<int, List<string>> _keysByLength;   // length-bucketed keys for fuzzy
@@ -127,15 +133,19 @@ internal sealed class RumourRepository
         if (name.Length >= MinSkeletonLength)
         {
             var skel = NameNormalizer.Skeleton(name);
-            string? best = null;
-            double bestScore = SkeletonThreshold;   // must strictly exceed to win
+            string? bestKey = null;
+            double best = 0, second = 0;
             foreach (var (sk, key) in _skeletons)
             {
                 int dist = ScanEngine.Levenshtein(skel, sk);
                 double score = 1.0 - (double)dist / Math.Max(skel.Length, sk.Length);
-                if (score > bestScore) { bestScore = score; best = key; }
+                if (score > best) { second = best; best = score; bestKey = key; }
+                else if (score > second) { second = score; }
             }
-            if (best is not null) return _byKey[best];
+            // High-confidence match, or a low-confidence but unambiguous clear winner.
+            if (bestKey is not null &&
+                (best > SkeletonThreshold || (best >= LowSkeletonFloor && best - second >= SkeletonMargin)))
+                return _byKey[bestKey];
         }
 
         return null;

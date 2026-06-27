@@ -76,6 +76,7 @@ public class RumourRepositoryTests
     [InlineData("Uwkwww miws", "Unknown Ruins")]
     [InlineData("Uhkwww miws", "Unknown Ruins")]
     [InlineData("Ovi4iw of doe fall", "Origin of the Fall")]
+    [InlineData("Sow10viw' fishzo", "Something Fishy")]   // catastrophic garble, but a clear winner
     public void Resolve_FontConfusion_RecoveredBySkeleton(string ocr, string expected)
     {
         var entry = Bundled.Resolve(ocr);
@@ -87,6 +88,7 @@ public class RumourRepositoryTests
     // stray non-name line, both stay unmatched (measured well below the threshold).
     [Theory]
     [InlineData("Waww but riskv")]        // an in-game rumour with no sheet entry under this name
+    [InlineData("WatL but Visklê")]       // ditto — must stay unmatched even with the low-confidence tier
     [InlineData("Rarity Rogue Exiles")]   // a mods line that leaked into the read
     public void Resolve_SkeletonDoesNotFalseMatch(string ocr)
     {
