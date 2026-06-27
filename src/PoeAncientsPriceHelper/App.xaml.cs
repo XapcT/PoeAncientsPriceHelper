@@ -103,7 +103,7 @@ public partial class App : System.Windows.Application
         {
             if (_capturing) return;   // rebind in progress: swallow keys from their normal actions
             // ESC closes the in-game panel — hide the overlay the instant the key goes down.
-            if (ev.Data.KeyCode == KeyCode.VcEscape) DismissOverlay();
+            if (ev.Data.KeyCode == KeyCode.VcEscape) { DismissOverlay(); RumourOverlayManager.HideNow(); }
             else if (ev.Data.KeyCode is KeyCode.VcLeftControl) _leftCtrlDown = true;
         };
         _hook.KeyReleased += (_, ev) =>
@@ -114,13 +114,16 @@ public partial class App : System.Windows.Application
             if (code == _debugKey) PriceOverlayManager.ToggleDebug();
             else if (code == _calibrateKey) InvokeCalibrate();
             else if (code == _startStopKey) InvokeStartStopToggle();
+            // Debug-only one-shot rumour read (#34 spine). F8 triggers a full-screen detect + overlay;
+            // the WORLD-gated auto-detect loop (#35) supersedes this manual trigger.
+            else if (DebugMode && code == KeyCode.VcF8) InvokeRumourScan();
             else if (code is KeyCode.VcLeftControl) _leftCtrlDown = false;
         };
         // Left-Ctrl + left click (the in-game "purchase" gesture) also dismisses the overlay.
         _hook.MousePressed += (_, ev) =>
         {
             if (_capturing) return;
-            if (ev.Data.Button == MouseButton.Button1 && _leftCtrlDown) DismissOverlay();
+            if (ev.Data.Button == MouseButton.Button1 && _leftCtrlDown) { DismissOverlay(); RumourOverlayManager.HideNow(); }
         };
         _ = _hook.RunAsync();
     }
@@ -172,6 +175,9 @@ public partial class App : System.Windows.Application
 
     private static void InvokeCalibrate() =>
         Current?.Dispatcher.BeginInvoke(() => (Current.MainWindow as MainWindow)?.RunCalibration());
+
+    private static void InvokeRumourScan() =>
+        Current?.Dispatcher.BeginInvoke(() => (Current.MainWindow as MainWindow)?.RunRumourScanOnce());
 
     protected override void OnExit(ExitEventArgs e)
     {

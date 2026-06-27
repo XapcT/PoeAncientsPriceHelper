@@ -10,6 +10,11 @@ namespace PoeAncientsPriceHelper;
 internal sealed record OcrRow(string NormalizedName, string RawText, int CenterY,
                               int Multiplier = 1, bool MultiplierExplicit = false);
 
+// A single OCR'd line with its bounding box, in the supplied bitmap's pixel coordinates. Used by the
+// rumour helper, which needs raw lines + positions across a whole frame rather than the price-panel
+// row extraction Scan performs.
+internal sealed record OcrTextLine(string Text, System.Drawing.Rectangle Bounds);
+
 internal sealed class OcrScanner
 {
     private readonly OcrEngine _engine;
@@ -71,6 +76,64 @@ internal sealed class OcrScanner
             catch { /* best-effort diagnostic */ }
         }
         return rows;
+    }
+
+    // General full-frame OCR for the rumour helper: returns every recognised line with its bounding
+    // box (in the supplied bitmap's pixel coords), instead of the price-panel row extraction Scan does.
+    // Optionally inverts first (light-on-dark game text → dark-on-light reads more reliably), and
+    // downscales when the frame exceeds the engine's MaxImageDimension, mapping the boxes back to
+    // original coordinates so callers can position an overlay against them.
+    public IReadOnlyList<OcrTextLine> RecognizeLines(Bitmap bmp, bool invert = true)
+    {
+        using var prepared = invert ? Preprocess(bmp) : null;
+        var working = prepared ?? bmp;
+
+        int maxDim = (int)OcrEngine.MaxImageDimension;
+        double scale = 1.0;
+        if (maxDim > 0 && Math.Max(working.Width, working.Height) > maxDim)
+            scale = (double)maxDim / Math.Max(working.Width, working.Height);
+
+        using var scaled = scale < 1.0 ? Resize(working, scale) : null;
+        using var softwareBitmap = ToSoftwareBitmap(scaled ?? working);
+
+        var result = _engine.RecognizeAsync(softwareBitmap).AsTask().GetAwaiter().GetResult();
+        var lines = new List<OcrTextLine>(result.Lines.Count);
+        foreach (var line in result.Lines)
+        {
+            if (string.IsNullOrWhiteSpace(line.Text) || line.Words.Count == 0) continue;
+            var bounds = UnionBounds(line, scale);
+            if (!bounds.IsEmpty) lines.Add(new OcrTextLine(line.Text.Trim(), bounds));
+        }
+        return lines;
+    }
+
+    // Union of a line's word bounding rects, scaled back to the original (pre-downscale) coordinates.
+    private static Rectangle UnionBounds(OcrLine line, double scale)
+    {
+        double l = double.MaxValue, t = double.MaxValue, r = double.MinValue, b = double.MinValue;
+        foreach (var w in line.Words)
+        {
+            var box = w.BoundingRect;
+            l = Math.Min(l, box.X); t = Math.Min(t, box.Y);
+            r = Math.Max(r, box.X + box.Width); b = Math.Max(b, box.Y + box.Height);
+        }
+        if (l > r || t > b) return Rectangle.Empty;
+        return Rectangle.FromLTRB(
+            (int)Math.Floor(l / scale), (int)Math.Floor(t / scale),
+            (int)Math.Ceiling(r / scale), (int)Math.Ceiling(b / scale));
+    }
+
+    // Fractional downscale (Upscale only does integer factors), used to fit a full frame under
+    // OcrEngine.MaxImageDimension.
+    private static Bitmap Resize(Bitmap src, double scale)
+    {
+        int w = Math.Max(1, (int)Math.Round(src.Width * scale));
+        int h = Math.Max(1, (int)Math.Round(src.Height * scale));
+        var dst = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using var g = Graphics.FromImage(dst);
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.DrawImage(src, 0, 0, w, h);
+        return dst;
     }
 
     private static int GetSafeUpscaleFactor(Bitmap bitmap)

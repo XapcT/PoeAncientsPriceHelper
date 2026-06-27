@@ -14,6 +14,11 @@ public partial class MainWindow : Window
     private PriceRepository? _repo;
     private IconCache? _icons;
     private ScanEngine? _engine;
+    // Rumour helper (#34): bundled data + a dedicated capture backend for one-shot full-screen reads.
+    // Lazily created on the first trigger so it costs nothing until used.
+    private RumourRepository? _rumours;
+    private RumourScanner? _rumourScanner;
+    private IScreenCaptureBackend? _rumourCapture;
     // 15s cap so a stalled poe.ninja/poecdn connection can't hang a whole fetch cycle for the
     // default 100s. Per-fetch cancellation (shutdown) is handled inside PriceRepository.
     // HTTP/2 + compression enabled for faster parallel fetches (5 concurrent requests multiplexed
@@ -392,6 +397,35 @@ public partial class MainWindow : Window
 
     private void CalibrateButton_Click(object sender, RoutedEventArgs e) => RunCalibration();
 
+    // Debug-only one-shot rumour read (#34 spine): capture the primary screen, detect the Island
+    // Rumours panel, resolve each rumour name, and show the ratings next to the panel. Wired to F8 via
+    // the App hook under --debug. The WORLD-gated auto-detect loop (#35) replaces this manual trigger.
+    // Capture + OCR run off the UI thread.
+    internal void RunRumourScanOnce()
+    {
+        _rumours ??= RumourRepository.LoadBundled();
+        _rumourCapture ??= CreateCaptureBackend();
+        var scanner = _rumourScanner ??= new RumourScanner(_rumourCapture, new OcrScanner(), _rumours);
+
+        var screen = System.Windows.Forms.Screen.PrimaryScreen?.Bounds
+                     ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+        Task.Run(() =>
+        {
+            try
+            {
+                var result = scanner.ReadOnce(screen);
+                if (result is { Rows.Count: > 0 })
+                    RumourOverlayManager.Show(result.Rows, result.PanelBounds);
+                else
+                    RumourOverlayManager.HideNow();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Rumour] scan failed: {ex.Message}");
+            }
+        });
+    }
+
     private void StartStopButton_Click(object sender, RoutedEventArgs e) => ToggleStartStop();
 
     // Selects the screen-capture backend based on config. "GDI" forces legacy BitBlt;
@@ -480,6 +514,8 @@ public partial class MainWindow : Window
         _trayIcon?.Dispose();
         _engine?.StopAndWait(TimeSpan.FromSeconds(2));
         _engine?.Dispose();
+        RumourOverlayManager.Close();
+        _rumourCapture?.Dispose();
         _repo?.Dispose();
         _icons?.Dispose();
         _http.Dispose();
