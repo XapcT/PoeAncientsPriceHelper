@@ -3,6 +3,7 @@
 [Oo]bj/
 /publish/
 /release/
+/.dotnet-tools/
 
 # Visual Studio / Rider / VS Code
 .vs/
@@ -33,3 +34,4 @@ headhunter.png
 
 # Claude Code dev tooling, notes, and local settings — kept out of the public repo
 .claude/
+CLAUDE.md

@@ -1,20 +1,46 @@
+using System.Net;
 using System.Net.Http;
 using System.Windows;
-using MahApps.Metro.Controls;
+using System.Windows.Media;
 using SharpHook.Data;
+using Velopack;
+using Velopack.Sources;
 
 namespace PoeAncientsPriceHelper;
 
-public partial class MainWindow : MetroWindow
+public partial class MainWindow : Window
 {
-    private const string UpdateRepository = "XapcT/PoeAncientsPriceHelper";
-
     private AppConfig _config = new();
     private PriceRepository? _repo;
     private IconCache? _icons;
     private ScanEngine? _engine;
-    private readonly HttpClient _http = new();
+    // Rumour helper: bundled data + a dedicated capture backend, plus the WORLD-gated auto-detect loop
+    // (#35). Created once on load; the loop runs in the background (idle off the Atlas map).
+    private RumourRepository? _rumours;
+    private RumourScanner? _rumourScanner;
+    private IScreenCaptureBackend? _rumourCapture;
+    private RumourScanEngine? _rumourEngine;
+    // 15s cap so a stalled poe.ninja/poecdn connection can't hang a whole fetch cycle for the
+    // default 100s. Per-fetch cancellation (shutdown) is handled inside PriceRepository.
+    // HTTP/2 + compression enabled for faster parallel fetches (5 concurrent requests multiplexed
+    // over a single connection instead of 5 separate TCP handshakes).
+    private readonly HttpClient _http = new(new SocketsHttpHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        MaxConnectionsPerServer = 4
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(15),
+        DefaultRequestVersion = HttpVersion.Version20,
+        DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+    };
     private bool _loading;
+    // Reentrancy guard for LeagueBox_SelectionChanged → StartupAsync (rapid league changes could
+    // otherwise overlap and dispose repo/icons mid-fetch). Also remembers whether the scanner was
+    // running before a league change so StartupAsync can restart it against the new repo/icons.
+    private bool _startingUp;
+    private bool _engineWasRunning;
 
     // Minimize-to-tray (#2). The window hides to a tray icon on minimize and restores from it; the X
     // button still fully exits. Scanning is independent of this window, so it keeps running in the tray.
@@ -37,62 +63,167 @@ public partial class MainWindow : MetroWindow
     {
         _config = ConfigStore.Load();
         PopulateFields();
+        // When already running in debug mode the relaunch is pointless — repurpose the link to open the
+        // folder the logs land in. App.DebugMode is settled by now (it's set in App.OnStartup, before the
+        // window's Loaded fires).
+        if (App.DebugMode)
+        {
+            DiagnosticsLink.Text = "Open logs";
+            DiagnosticsLink.ToolTip = "Open the folder with scan_log.txt and debug_ocr.png";
+        }
         await StartupAsync();
+        InitRumourHelper();
+        // Auto-start QoL: with a calibrated region and the option enabled, begin scanning and drop
+        // straight to the tray, so the user just opens the app and it runs (saving the Start + minimize
+        // clicks). Skipped under --debug (keep the window and console visible for troubleshooting) and
+        // when not calibrated (the user has to calibrate first, so the window must stay up for input).
+        // _engine is null here on a fresh load (StartupAsync only restarts it across a league change).
+        if (_config.AutoStart && _config.IsCalibrated && !App.DebugMode && _engine is null)
+        {
+            ToggleStartStop();                     // start the engine; flips the button to Stop
+            WindowState = WindowState.Minimized;   // OnStateChanged hides to tray + shows the balloon once
+        }
         // Fire-and-forget, once per launch (not inside StartupAsync, which re-runs on league change).
         // A slow/hung GitHub response must never delay the price fetch or the Start button.
         _ = CheckForUpdatesAsync();
     }
 
-    // Quietly check GitHub for a newer release on startup. On success with a higher version, show a
-    // red "update available" link; on any failure (offline, rate-limited, API shape change) do nothing.
-    private string? _updateUrl;
+    // Check GitHub Releases for a newer build via Velopack on startup AND on every 30-min price
+    // refresh (see OnPricesUpdated), so a release published while the app is left running gets picked
+    // up without a restart. If one is found, eagerly download/stage it in the background so both
+    // "Update now" (the link below) and the silent apply-on-exit (#14) are instant. Only works from an
+    // installed build — in a dev/unpacked run UpdateManager.IsInstalled is false and this no-ops. Any
+    // failure (offline, rate-limited, not installed) is swallowed: the link just stays hidden, exactly
+    // as the old check did. Stable only (prerelease: false). The manager + staged UpdateInfo are
+    // retained for the on-exit apply (#14).
+    private UpdateManager? _updateManager;
+    private UpdateInfo? _stagedUpdate;
+    // 0/1 reentrancy flag (via Interlocked): the startup check can overlap the first timer tick, and a
+    // slow GitHub response can outlast the 30-min interval — either way only one check runs at a time.
+    private int _updateCheckInFlight;
+
+    // Update feed: GitHub Releases in production. If POEPRICE_UPDATE_FEED names a local folder (a
+    // `vpk pack` output dir), read from it via SimpleFileSource instead — that lets the full
+    // check → download → apply → restart cycle (and the on-exit apply) be tested from disk on one
+    // machine, with no public release. Run the *installed* app (Setup.exe) with the var set and a
+    // newer-versioned package in the folder. See .claude/issues/15.
+    private const string GithubRepoUrl = "https://github.com/XapcT/PoeAncientsPriceHelper";
+
+    private static IUpdateSource ResolveUpdateSource()
+    {
+        var localFeed = Environment.GetEnvironmentVariable("POEPRICE_UPDATE_FEED");
+        if (!string.IsNullOrWhiteSpace(localFeed))
+            return new SimpleFileSource(new DirectoryInfo(localFeed));
+        return new GithubSource(GithubRepoUrl, null, prerelease: false);
+    }
 
     private async Task CheckForUpdatesAsync()
     {
+        // A build is already staged and waiting to apply (on "Update now" or on exit) — re-checking
+        // every 30 min would just re-download the same release. Stop once we've found one.
+        if (_stagedUpdate is not null) return;
+        // Drop this check if one is already running (startup overlapping the first tick, or a slow
+        // check spanning a tick). Exchange returns the prior value: 1 means a check is already in flight.
+        if (Interlocked.Exchange(ref _updateCheckInFlight, 1) == 1) return;
         try
         {
-            var current = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-            if (current is null) return;
+            // Disable deltas (MaximumDeltasBeforeFallback < 0 → download the full package). Reconstructing
+            // a full release from a delta during the otherwise-silent background DownloadUpdatesAsync
+            // spawns Velopack's Update.exe, which flashes a visible window — seen on the first delta
+            // update (3.0.0 → 3.1.0). The full package is a larger download but keeps the background
+            // stage truly silent; the user only ever sees the "Update now" link.
+            var mgr = new UpdateManager(ResolveUpdateSource(),
+                new UpdateOptions { MaximumDeltasBeforeFallback = -1 });
+            AppPaths.LogUpdate($"check start; IsInstalled={mgr.IsInstalled}");
+            if (!mgr.IsInstalled) return;   // dev / unpacked run — nothing to update
 
-            var req = new HttpRequestMessage(HttpMethod.Get,
-                $"https://api.github.com/repos/{UpdateRepository}/releases/latest");
-            req.Headers.TryAddWithoutValidation("User-Agent", "PoeAncientsPriceHelper-RU");  // GitHub 403s without one
-            req.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+            var info = await mgr.CheckForUpdatesAsync();
+            if (info is null) { AppPaths.LogUpdate("no update available"); return; }
 
-            var resp = await _http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return;
+            AppPaths.LogUpdate($"found v{info.TargetFullRelease.Version}; downloading…");
+            await mgr.DownloadUpdatesAsync(info);   // stage now so applying is instant
+            _updateManager = mgr;
+            _stagedUpdate = info;
+            App.PendingUpdateManager = mgr;   // App.OnExit reads these — MainWindow is already gone by then
+            App.PendingUpdate = info;
+            AppPaths.LogUpdate($"staged v{info.TargetFullRelease.Version} — ready to apply");
 
-            var json = await resp.Content.ReadAsStringAsync();
-            var obj = Newtonsoft.Json.Linq.JObject.Parse(json);
-            var tag = (string?)obj["tag_name"];
-            if (string.IsNullOrWhiteSpace(tag) || !Version.TryParse(tag.TrimStart('v', 'V'), out var latest))
-                return;
-
-            // Compare Major.Minor.Build only (ignore revision); only flag a genuinely newer release.
-            var cur = new Version(current.Major, current.Minor, Math.Max(current.Build, 0));
-            var rem = new Version(latest.Major, latest.Minor, Math.Max(latest.Build, 0));
-            if (rem <= cur) return;
-
-            _updateUrl = (string?)obj["html_url"];
+            var version = info.TargetFullRelease.Version;
             _ = Dispatcher.BeginInvoke(() =>
             {
-                UpdateLink.Text = $"Доступно обновление: v{rem.Major}.{rem.Minor}.{rem.Build}";
+                UpdateLink.Text = $"Update now: v{version} - click to install & restart";
                 UpdateLink.Visibility = Visibility.Visible;
+                // Test seam (parallels POEPRICE_UPDATE_FEED): drive the real "Update now" relaunch path
+                // without a synthetic mouse click. Never set in production.
+                if (Environment.GetEnvironmentVariable("POEPRICE_TEST_UPDATE_NOW") == "1")
+                {
+                    AppPaths.LogUpdate("test seam: auto-invoking Update now");
+                    ApplyUpdateNow();
+                }
             });
         }
-        catch { /* offline / rate-limited / shape change — fail silently, leave the link hidden */ }
+        catch (Exception ex) { AppPaths.LogUpdate($"check failed: {ex.GetType().Name}: {ex.Message}"); }
+        finally { Interlocked.Exchange(ref _updateCheckInFlight, 0); }
     }
 
-    private void UpdateLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void CreditsLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (string.IsNullOrEmpty(_updateUrl)) return;
+        new CreditsWindow { Owner = this }.ShowDialog();
+    }
+
+    private void UpdateLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) => ApplyUpdateNow();
+
+    // "Diagnostics" link. In a normal run it offers to restart with --debug so the user can capture
+    // scan_log.txt / debug_ocr.png for a bug report (the old debug.cmd no longer ships with the Velopack
+    // build). When already running in debug mode it instead opens the folder those files land in.
+    private void DiagnosticsLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (App.DebugMode) { OpenDataFolder(); return; }
+
+        var choice = System.Windows.MessageBox.Show(this,
+            "Restart with diagnostics logging enabled?\n\n" +
+            "A console window will open and detailed logs (scan_log.txt and debug_ocr.png) will be " +
+            "written to your data folder so you can attach them to a bug report.\n\n" +
+            "The app will close and reopen now.",
+            "Diagnostics", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Question);
+        if (choice != System.Windows.MessageBoxResult.OK) return;
+
+        if (App.RelaunchWithDebug())
+            Close();   // routes through Window_Closing for a clean shutdown; the new --debug copy takes over
+        else
+            System.Windows.MessageBox.Show(this,
+                "Couldn't restart in diagnostics mode. You can launch the app from a terminal with the " +
+                "--debug switch instead.",
+                "Diagnostics", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+    }
+
+    private void OpenDataFolder()
+    {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_updateUrl) { UseShellExecute = true });
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(AppPaths.DataDir) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[Update] failed to open browser: {ex.Message}");
+            Console.Error.WriteLine($"[Diagnostics] open data folder failed: {ex.Message}");
+        }
+    }
+
+    // Apply the already-staged update and relaunch into the new version. Invoked by the "Update now"
+    // link, and by the POEPRICE_TEST_UPDATE_NOW test seam so the relaunch path is exercised directly.
+    internal void ApplyUpdateNow()
+    {
+        if (_updateManager is null || _stagedUpdate is null) return;
+        try
+        {
+            AppPaths.LogUpdate($"applying v{_stagedUpdate.TargetFullRelease.Version} + restart (Update now)");
+            _updateManager.ApplyUpdatesAndRestart(_stagedUpdate);   // instant — already staged
+        }
+        catch (Exception ex)
+        {
+            AppPaths.LogUpdate($"apply-now failed: {ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine($"[Update] apply failed: {ex.Message}");
         }
     }
 
@@ -103,18 +234,32 @@ public partial class MainWindow : MetroWindow
         LeagueBox.SelectedItem = _config.AvailableLeagues.Contains(_config.LeagueName)
             ? _config.LeagueName
             : _config.AvailableLeagues.FirstOrDefault();
-        // Arm the global hook with all three persisted bindings and mirror them into the labels.
-        var startStop = HotkeyBinding.Parse(_config.StartStopHotkey);
-        var debug = HotkeyBinding.Parse(_config.DebugHotkey);
-        var calibrate = HotkeyBinding.Parse(_config.CalibrateHotkey);
-        HotkeyLabel.Text = HotkeyBinding.Display(startStop);
-        DebugHotkeyLabel.Text = HotkeyBinding.Display(debug);
-        CalibrateHotkeyLabel.Text = HotkeyBinding.Display(calibrate);
-        App.SetStartStopKey(startStop);
-        App.SetDebugKey(debug);
-        App.SetCalibrateKey(calibrate);
+        // Arm the global hook with all three persisted bindings. The keybind UI lives in the Settings
+        // window now, but the hook must be armed at startup so the hotkeys work before it's ever opened.
+        App.SetStartStopKey(HotkeyBinding.Parse(_config.StartStopHotkey));
+        App.SetDebugKey(HotkeyBinding.Parse(_config.DebugHotkey));
+        App.SetCalibrateKey(HotkeyBinding.Parse(_config.CalibrateHotkey));
         UpdateRegionLabel();
+        ThemePresets.Apply(ThemePresets.Resolve(_config.Theme));
         _loading = false;
+    }
+
+    // Opens the modal Settings window. It edits the same _config instance and persists each change, so
+    // nothing needs syncing back here: theme is applied app-wide live, hotkey rebinds re-arm the hook,
+    // and capture/auto-start are read straight from _config when next needed.
+    private void SettingsButton_Click(object sender, RoutedEventArgs e) =>
+        new SettingsWindow(_config, RefreshRumourDataAsync) { Owner = this }.ShowDialog();
+
+    // "Refresh from sheet" (#37): pull the latest rumour CSV, cache it, and swap it into the running
+    // scanner so it applies live. On failure the existing data is kept; the result message is shown in
+    // Settings.
+    internal async Task<RumourRefreshResult> RefreshRumourDataAsync()
+    {
+        InitRumourHelper();
+        var result = await RumourRefresher.RefreshAsync(_http);
+        if (result is { Success: true, Repository: not null })
+            _rumourScanner!.UseData(result.Repository);
+        return result;
     }
 
     private void UpdateRegionLabel()
@@ -129,11 +274,23 @@ public partial class MainWindow : MetroWindow
         StatusLabel.Text = "Fetching prices from poe.ninja…";
         StartStopButton.IsEnabled = false;
 
+        // Stop the scanner before disposing the repo/icons it depends on (league change, initial load).
+        // Otherwise a running ScanEngine keeps referencing the OLD repo (stale prices) and icons
+        // (disposed IconCache → crashes/stale icons).
+        _engineWasRunning = _engine is { IsRunning: true };
+        if (_engine is not null)
+        {
+            _engine.StopAndWait(TimeSpan.FromSeconds(2));
+            _engine.Dispose();
+            _engine = null;
+        }
+
         _repo?.Dispose();
         _icons?.Dispose();
 
         _repo = new PriceRepository(_http);
         _repo.PricesUpdated += OnPricesUpdated;   // keep the "last fetch" label live on each refresh
+        _repo.FetchFailed += OnFetchFailed;       // flag a failed fetch (red/amber) in the status label
         _icons = new IconCache(_http);
 
         await Task.WhenAll(
@@ -144,20 +301,85 @@ public partial class MainWindow : MetroWindow
 
         UpdateStatusLabel();
         StartStopButton.IsEnabled = _config.IsCalibrated;
-        if (!_config.IsCalibrated)
-            StatusLabel.Text += "  ·  сначала откалибруй область списка (F4)";
+
+        // If the scanner was running before the league change, restart it with the new repo/icons.
+        if (_engineWasRunning && _config.IsCalibrated)
+        {
+            _engine = new ScanEngine(_config, _repo, _icons, CreateCaptureBackend());
+            _engine.Start();
+            StartStopButton.Content = "Stop";
+            StartStopButton.Background = System.Windows.Media.Brushes.DarkRed;
+        }
+        else
+        {
+            StartStopButton.Content = "Start";
+            StartStopButton.Background = System.Windows.Media.Brushes.DarkGreen;
+        }
+        _engineWasRunning = false;
     }
 
     // The 30-min background refresh fires on a thread-pool thread — marshal to the UI thread
     // before touching the label. (Previously the label was set once at startup and never updated,
     // so it stayed frozen at the launch-time fetch even though prices kept refreshing.)
-    private void OnPricesUpdated() => Dispatcher.BeginInvoke(UpdateStatusLabel);
+    private void OnPricesUpdated()
+    {
+        Dispatcher.BeginInvoke(UpdateStatusLabel);
+        // Piggyback the update check on the 30-min price refresh: a build released while the app is
+        // left running (common, since it lives in the tray during a play session) is now picked up
+        // without a restart. No-ops once something is staged, and is reentrancy-guarded. (#27 follow-up)
+        _ = CheckForUpdatesAsync();
+    }
+
+    // Status-label colors: normal (matches the XAML default), amber when a refresh failed but prices
+    // from an earlier fetch are still showing, red when no prices have ever loaded.
+    private static readonly System.Windows.Media.Brush StatusNormalBrush = FrozenBrush(0x66, 0x66, 0x66);
+    private static readonly System.Windows.Media.Brush StatusStaleBrush = FrozenBrush(0xE0, 0xB0, 0x60);
+    private static readonly System.Windows.Media.Brush StatusFailBrush = FrozenBrush(0xFF, 0x55, 0x55);
+
+    private static System.Windows.Media.Brush FrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
 
     private void UpdateStatusLabel()
     {
         if (_repo is null) return;
+        // Called after a fetch completes (initial load + each successful refresh). If we still have no
+        // prices, the fetch failed — show the red state (the repo is retrying every 30s) rather than a
+        // misleading "0 items loaded". This also avoids a successful-path call clobbering the failure.
+        if (_repo.ItemCount == 0)
+        {
+            StatusLabel.Foreground = StatusFailBrush;
+            StatusLabel.Text = "Failed to get prices from poe.ninja — retrying…";
+            return;
+        }
         string fetched = _repo.LastFetchedAt is { } t ? t.ToString("MMM d HH:mm") : "never";
+        StatusLabel.Foreground = StatusNormalBrush;
         StatusLabel.Text = $"{_repo.ItemCount} items loaded  ·  last fetch {fetched}";
+    }
+
+    // A fetch failed (network error or 0 items). Prices already loaded from a prior fetch are kept, so
+    // distinguish "couldn't refresh, still showing the last set" (amber) from "never got any" (red).
+    // The repository retries every 30s until it succeeds, when OnPricesUpdated restores the normal label.
+    private void OnFetchFailed()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_repo is null) return;
+            if (_repo.ItemCount > 0)
+            {
+                string t = _repo.LastFetchedAt is { } at ? at.ToString("MMM d HH:mm") : "earlier";
+                StatusLabel.Foreground = StatusStaleBrush;
+                StatusLabel.Text = $"Couldn't refresh — retrying (showing last fetch {t})";
+            }
+            else
+            {
+                StatusLabel.Foreground = StatusFailBrush;
+                StatusLabel.Text = "Failed to get prices from poe.ninja — retrying…";
+            }
+        });
     }
 
     // internal so the App-level hook (configurable Calibrate key) can trigger it too.
@@ -176,7 +398,60 @@ public partial class MainWindow : MetroWindow
 
     private void CalibrateButton_Click(object sender, RoutedEventArgs e) => RunCalibration();
 
+    // Creates the rumour helper (bundled data + dedicated capture backend + scanner) and starts the
+    // WORLD-gated auto-detect loop (#35). Idempotent and independent of the price repo/icons, so it is
+    // created once on load and not torn down on a league change.
+    private void InitRumourHelper()
+    {
+        if (_rumourScanner is not null) return;
+        _rumours = RumourRepository.Load();   // refreshed cache if present, else bundled snapshot
+        _rumourCapture = CreateCaptureBackend();
+        _rumourScanner = new RumourScanner(_rumourCapture, new OcrScanner(), _rumours);
+        _rumourEngine = new RumourScanEngine(_rumourScanner, RumourScreen,
+            () => _config.RumourHelperEnabled, () => _config.RumourScanIntervalMs);
+        _rumourEngine.Start();
+    }
+
+    // The screen the rumour loop watches: the monitor PoE runs on (derived from the calibrated price
+    // region when available), else the primary monitor.
+    private System.Drawing.Rectangle RumourScreen() =>
+        _config.IsCalibrated
+            ? System.Windows.Forms.Screen.FromRectangle(_config.RegionRect).Bounds
+            : (System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080));
+
+    // Debug-only one-shot rumour read (#34 spine): detect the Island Rumours panel now and show the
+    // ratings next to it. Wired to F8 via the App hook under --debug; the auto-detect loop (#35) is the
+    // real interaction. Capture + OCR run off the UI thread.
+    internal void RunRumourScanOnce()
+    {
+        InitRumourHelper();
+        var scanner = _rumourScanner!;
+        var screen = RumourScreen();
+        Task.Run(() =>
+        {
+            try
+            {
+                var result = scanner.ReadOnce(screen);
+                if (result is { Rows.Count: > 0 })
+                    RumourOverlayManager.Show(result.Rows, result.PanelBounds);
+                else
+                    RumourOverlayManager.HideNow();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Rumour] scan failed: {ex.Message}");
+            }
+        });
+    }
+
     private void StartStopButton_Click(object sender, RoutedEventArgs e) => ToggleStartStop();
+
+    // Selects the screen-capture backend based on config. "GDI" forces legacy BitBlt;
+    // "Auto"/"WGC" use Windows Graphics Capture (GPU) with built-in GDI fallback per call.
+    private IScreenCaptureBackend CreateCaptureBackend() =>
+        _config.CaptureBackend == "GDI"
+            ? new GdiScreenCaptureBackend()
+            : new WgcScreenCaptureBackend();
 
     // Shared by the Start/Stop button and the configurable global hotkey (invoked via App, marshalled
     // to the UI thread). internal so the App-level hook can reach it.
@@ -186,7 +461,7 @@ public partial class MainWindow : MetroWindow
         {
             // The hotkey can fire even when the button is disabled — don't start until we're ready.
             if (!_config.IsCalibrated || _repo is null || _icons is null) return;
-            _engine = new ScanEngine(_config, _repo, _icons);
+            _engine = new ScanEngine(_config, _repo, _icons, CreateCaptureBackend());
             _engine.Start();
             StartStopButton.Content = "Stop";
             StartStopButton.Background = System.Windows.Media.Brushes.DarkRed;
@@ -257,6 +532,9 @@ public partial class MainWindow : MetroWindow
         _trayIcon?.Dispose();
         _engine?.StopAndWait(TimeSpan.FromSeconds(2));
         _engine?.Dispose();
+        _rumourEngine?.Dispose();
+        RumourOverlayManager.Close();
+        _rumourCapture?.Dispose();
         _repo?.Dispose();
         _icons?.Dispose();
         _http.Dispose();
@@ -266,85 +544,20 @@ public partial class MainWindow : MetroWindow
     private async void LeagueBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (_loading || LeagueBox.SelectedItem is not string league || league == _config.LeagueName) return;
-        _config.LeagueName = league;
-        ConfigStore.Save(_config);
-        await StartupAsync();   // re-fetch prices for the newly selected league
-    }
-
-    // The rebind in progress: which action, and the button/label to update. Only one runs at a time.
-    private HotkeyBinding.Action _rebindAction;
-    private System.Windows.Controls.Button? _rebindButton;
-    private System.Windows.Controls.TextBlock? _rebindLabel;
-
-    private void RebindButton_Click(object sender, RoutedEventArgs e) =>
-        BeginRebind(HotkeyBinding.Action.StartStop, RebindButton, HotkeyLabel);
-
-    private void RebindDebugButton_Click(object sender, RoutedEventArgs e) =>
-        BeginRebind(HotkeyBinding.Action.Debug, RebindDebugButton, DebugHotkeyLabel);
-
-    private void RebindCalibrateButton_Click(object sender, RoutedEventArgs e) =>
-        BeginRebind(HotkeyBinding.Action.Calibrate, RebindCalibrateButton, CalibrateHotkeyLabel);
-
-    private void BeginRebind(HotkeyBinding.Action action, System.Windows.Controls.Button button,
-                             System.Windows.Controls.TextBlock label)
-    {
-        _rebindAction = action;
-        _rebindButton = button;
-        _rebindLabel = label;
-        // Disable all three rebind buttons so a second capture can't start mid-rebind.
-        SetRebindButtonsEnabled(false);
-        button.Content = "Press a key… (Esc to cancel)";
-        App.BeginHotkeyCapture(action, OnHotkeyCaptured);   // outcome arrives on the UI thread
-    }
-
-    // Invoked (marshalled to the UI thread) when the global hook resolves a rebind capture.
-    private void OnHotkeyCaptured(App.CaptureOutcome outcome, KeyCode code)
-    {
-        switch (outcome)
+        if (_startingUp) return;  // prevent overlapping StartupAsync calls (rapid league changes)
+        _startingUp = true;
+        try
         {
-            case App.CaptureOutcome.Captured:
-                switch (_rebindAction)
-                {
-                    case HotkeyBinding.Action.StartStop:
-                        _config.StartStopHotkey = HotkeyBinding.ToStorage(code);
-                        App.SetStartStopKey(code);
-                        break;
-                    case HotkeyBinding.Action.Debug:
-                        _config.DebugHotkey = HotkeyBinding.ToStorage(code);
-                        App.SetDebugKey(code);
-                        break;
-                    case HotkeyBinding.Action.Calibrate:
-                        _config.CalibrateHotkey = HotkeyBinding.ToStorage(code);
-                        App.SetCalibrateKey(code);
-                        break;
-                }
-                ConfigStore.Save(_config);
-                if (_rebindLabel is not null) _rebindLabel.Text = HotkeyBinding.Display(code);
-                EndRebind();
-                break;
-            case App.CaptureOutcome.Reserved:
-                // Still listening — tell the user why that key won't take, keep the prompt up.
-                if (_rebindButton is not null)
-                    _rebindButton.Content = $"{HotkeyBinding.Display(code)} is in use — try another";
-                break;
-            case App.CaptureOutcome.Cancelled:
-                EndRebind();
-                break;
+            LeagueBox.IsEnabled = false;  // disable during reload
+            _config.LeagueName = league;
+            ConfigStore.Save(_config);
+            await StartupAsync();   // re-fetch prices for the newly selected league
+        }
+        finally
+        {
+            LeagueBox.IsEnabled = true;
+            _startingUp = false;
         }
     }
 
-    private void EndRebind()
-    {
-        if (_rebindButton is not null) _rebindButton.Content = "Rebind";
-        _rebindButton = null;
-        _rebindLabel = null;
-        SetRebindButtonsEnabled(true);
-    }
-
-    private void SetRebindButtonsEnabled(bool enabled)
-    {
-        RebindButton.IsEnabled = enabled;
-        RebindDebugButton.IsEnabled = enabled;
-        RebindCalibrateButton.IsEnabled = enabled;
-    }
 }

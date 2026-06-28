@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
+using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -7,68 +8,142 @@ namespace PoeAncientsPriceHelper;
 
 // DivineValue  = price in divine orbs (primaryValue from API)
 // ExaltedValue = DivineValue * core.rates.exalted (computed, for display when < 1 divine)
-internal sealed record PriceEntry(decimal DivineValue, decimal ExaltedValue);
+internal sealed record PriceEntry(decimal DivineValue, decimal ExaltedValue, bool HasMarketData = true);
+
+// Atomic snapshot of prices + length index, published together so the scan loop can never
+// see a new _prices with a stale _keysByLength (or vice versa) during a background refresh.
+internal sealed record PriceSnapshot(
+    IReadOnlyDictionary<string, PriceEntry> Prices,
+    IReadOnlyDictionary<int, List<string>> KeysByLength);
 
 internal sealed class PriceRepository : IDisposable
 {
     private readonly HttpClient _http;
-    private volatile IReadOnlyDictionary<string, PriceEntry> _prices =
-        new ReadOnlyDictionary<string, PriceEntry>(new Dictionary<string, PriceEntry>());
+    private static readonly PriceSnapshot Empty = new(
+        new ReadOnlyDictionary<string, PriceEntry>(new Dictionary<string, PriceEntry>()),
+        new Dictionary<int, List<string>>());
+    private volatile PriceSnapshot _snapshot = Empty;
     private System.Threading.Timer? _timer;
+    // Cancelled on Dispose so a fetch in flight at shutdown (or one stuck behind the HttpClient
+    // timeout) is abandoned cleanly instead of running on against a disposed client.
+    private readonly CancellationTokenSource _cts = new();
+    private int _priceGeneration;
 
-    public IReadOnlyDictionary<string, PriceEntry> Prices => _prices;
+    // Adaptive refresh cadence: normally every 30 min, but after a failed fetch (0 usable items) the
+    // timer re-arms every 30s until prices come back — so a launch/refresh that hit a transient
+    // poe.ninja outage recovers in seconds instead of being stuck behind the full 30-min interval.
+    private static readonly TimeSpan NormalInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(30);
+    private AppConfig? _refreshConfig;
+
+    public PriceSnapshot Current => _snapshot;
+    public IReadOnlyDictionary<string, PriceEntry> Prices => _snapshot.Prices;
+    // Snapshot of the length-bucketed key index, for the fuzzy matcher in ScanEngine.
+    public IReadOnlyDictionary<int, List<string>> KeysByLength => _snapshot.KeysByLength;
     public DateTime? LastFetchedAt { get; private set; }
-    public int ItemCount => _prices.Count;
+    public int ItemCount => _snapshot.Prices.Count;
+    // Bumped each time _prices is replaced; ScanEngine uses it to invalidate its resolution cache.
+    public int PriceGeneration => Volatile.Read(ref _priceGeneration);
 
-    // Raised after every successful fetch (initial + each 30-min background refresh) so the UI can
-    // refresh its "last fetch" label — which otherwise stays frozen at the startup time. Fires on a
+    // Raised after every successful fetch (initial + each background refresh) so the UI can refresh
+    // its "last fetch" label — which otherwise stays frozen at the startup time. Fires on a
     // thread-pool thread; subscribers must marshal to the UI thread.
     public event Action? PricesUpdated;
 
-    // UncutGems shares the exact same response shape as the others: a root items[] maps each
-    // line id (e.g. "uncut-spirit-gem-19") to a display name that already carries the level
-    // ("Uncut Spirit Gem (Level 19)"), which NormalizeName reduces to "uncut spirit gem level 19" —
-    // the same string the OCR produces. So no special parsing is needed; matching safety (pinning
-    // the gem type + level) lives in ScanEngine.BuildPriceRows.
-    private static readonly string[] ExchangeTypes = ["Verisium", "Runes", "Expedition", "Currency", "UncutGems"];
+    // Raised when a fetch fails (a network exception, or every request came back empty so we ended up
+    // with 0 usable items). The previous good snapshot is kept, not overwritten — so the overlay keeps
+    // showing the last prices — and the UI can flag the failure (ItemCount/LastFetchedAt tell it
+    // whether any prices were ever loaded). Not raised on shutdown cancellation. Fires off the UI thread.
+    public event Action? FetchFailed;
+
+    // Only the 5 exchange categories whose items actually appear as Verisium Remnant rewards.
+    // Other poe.ninja categories (Essences, SoulCores, Idols, Omens, Catalysts, etc.) belong to
+    // different game mechanics and never show up in the remnant panel — fetching them only wastes
+    // bandwidth and risks false fuzzy matches.
+    private static readonly string[] ExchangeTypes = ["Currency", "Runes", "Expedition", "Verisium", "UncutGems"];
 
     public PriceRepository(HttpClient http) => _http = http;
 
     public async Task InitialFetchAsync(AppConfig config)
     {
-        await FetchAndMergeAsync(config);
+        await FetchAndMergeAsync(config, _cts.Token);
     }
 
     public void StartAutoRefresh(AppConfig config)
     {
+        _refreshConfig = config;
         _timer?.Dispose();
-        _timer = new System.Threading.Timer(_ => Task.Run(() => FetchAndMergeAsync(config)),
-            null, TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30));
+        // Self-rescheduling (period = Infinite): each tick re-arms based on its own outcome, so the
+        // cadence adapts between 30 min (healthy) and 30s (retrying). The first delay reflects the
+        // initial fetch already done in InitialFetchAsync — retry fast if it produced nothing.
+        _timer = new System.Threading.Timer(RefreshTick, null,
+            ItemCount == 0 ? RetryInterval : NormalInterval, Timeout.InfiniteTimeSpan);
     }
 
-    private async Task FetchAndMergeAsync(AppConfig config)
+    // Timer callback (async void is fine here: FetchAndMergeAsync swallows its own exceptions and
+    // never throws). Re-arms the one-shot timer to the next interval based on whether prices loaded.
+    private async void RefreshTick(object? _)
+    {
+        if (_cts.IsCancellationRequested) return;
+        bool ok = await FetchAndMergeAsync(_refreshConfig!, _cts.Token);
+        try { _timer?.Change(ok ? NormalInterval : RetryInterval, Timeout.InfiniteTimeSpan); }
+        catch (ObjectDisposedException) { /* disposed during shutdown — nothing to re-arm */ }
+    }
+
+    // Returns true if the fetch published at least one usable price. On failure (a network exception
+    // or 0 items) the previous good snapshot is left in place — a transient outage must not blank the
+    // overlay — and FetchFailed is raised so the UI can flag it. Shutdown cancellation returns false
+    // quietly (no event).
+    private async Task<bool> FetchAndMergeAsync(AppConfig config, CancellationToken ct)
     {
         try
         {
+            // Fetch all exchange types concurrently (independent HTTP requests) instead of
+            // sequentially — the round-trip latency dominates, so this cuts fetch time roughly
+            // to a single request's.
+            var tasks = ExchangeTypes.Select(type => FetchTypeAsync(config.LeagueName, type, ct)).ToList();
+            var results = await Task.WhenAll(tasks);
             var dict = new Dictionary<string, PriceEntry>();
-            foreach (var type in ExchangeTypes)
-            {
-                var entries = await FetchTypeAsync(config.LeagueName, type);
+            foreach (var entries in results)
                 foreach (var (name, entry) in entries)
                     dict[name] = entry;
-            }
             ApplyCustomOverride(dict, config.CustomPricesPath);
-            _prices = new ReadOnlyDictionary<string, PriceEntry>(dict);
+
+            // Every request came back empty (poe.ninja down/blocking, bad league, etc.). Keep the last
+            // good snapshot so the overlay stays useful, flag the failure, and let the caller retry soon.
+            if (dict.Count == 0)
+            {
+                Console.Error.WriteLine("[PriceRepository] fetch produced 0 items — keeping last prices");
+                FetchFailed?.Invoke();
+                return false;
+            }
+
+            var keysByLength = dict.Keys.GroupBy(k => k.Length).ToDictionary(g => g.Key, g => g.ToList());
+            // Publish both atomically in a single volatile write so the scan loop never sees
+            // a new Prices with a stale KeysByLength (or vice versa).
+            _snapshot = new PriceSnapshot(
+                new ReadOnlyDictionary<string, PriceEntry>(dict),
+                keysByLength);
+            Interlocked.Increment(ref _priceGeneration);
             LastFetchedAt = DateTime.Now;
             PricesUpdated?.Invoke();
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Shutting down — abandon this cycle quietly. (A timeout, by contrast, is not
+            // cancellation-requested, so it falls through to the failure handling below.)
+            return false;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[PriceRepository] fetch failed: {ex.Message}");
+            FetchFailed?.Invoke();
+            return false;
         }
     }
 
-    private async Task<Dictionary<string, PriceEntry>> FetchTypeAsync(string league, string type)
+    private async Task<Dictionary<string, PriceEntry>> FetchTypeAsync(string league, string type, CancellationToken ct)
     {
         var slug = league.Replace(" ", "").ToLowerInvariant();
         var typeSlug = type.ToLowerInvariant();
@@ -80,14 +155,14 @@ internal sealed class PriceRepository : IDisposable
         req.Headers.TryAddWithoutValidation("Referer",
             $"https://poe.ninja/poe2/economy/{slug}/{typeSlug}");
 
-        var resp = await _http.SendAsync(req);
+        using var resp = await _http.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode)
         {
             Console.Error.WriteLine($"[PriceRepository] {type}: HTTP {(int)resp.StatusCode}");
             return [];
         }
 
-        var json = await resp.Content.ReadAsStringAsync();
+        var json = await resp.Content.ReadAsStringAsync(ct);
         return ParseResponse(json);
     }
 
@@ -129,12 +204,21 @@ internal sealed class PriceRepository : IDisposable
             {
                 var id = line["id"]?.Value<string>();
                 if (id is null || !nameMap.TryGetValue(id, out var name)) continue;
-                var primaryValue = line["primaryValue"]?.Value<decimal>() ?? 0m;
+                // Items with null primaryValue exist in poe.ninja but have no trading data.
+                // Keep them in the dictionary (marked HasMarketData=false) so the overlay can show
+                // "no info" for known items instead of being invisible.
+                var primaryValueToken = line["primaryValue"];
+                var key = NameNormalizer.Normalize(name);
+                if (string.IsNullOrEmpty(key)) continue;
+                if (primaryValueToken is null || primaryValueToken.Type == JTokenType.Null)
+                {
+                    result[key] = new PriceEntry(0m, 0m, HasMarketData: false);
+                    continue;
+                }
+                var primaryValue = primaryValueToken.Value<decimal>();
                 var divineValue = primaryValue * divinePerPrimary;
                 var exaltedValue = Math.Round(primaryValue * exaltedPerPrimary, 1);
-                var key = NormalizeName(name);
-                if (!string.IsNullOrEmpty(key))
-                    result[key] = new PriceEntry(divineValue, exaltedValue);
+                result[key] = new PriceEntry(divineValue, exaltedValue);
             }
         }
         catch (Exception ex)
@@ -150,14 +234,14 @@ internal sealed class PriceRepository : IDisposable
         {
             var fullPath = Path.IsPathRooted(path)
                 ? path
-                : Path.Combine(AppContext.BaseDirectory, path);
+                : Path.Combine(AppPaths.DataDir, path);
             if (!File.Exists(fullPath)) return;
             var json = File.ReadAllText(fullPath);
             var overrides = JsonConvert.DeserializeObject<Dictionary<string, CustomPriceEntry>>(json);
             if (overrides is null) return;
             foreach (var (rawKey, entry) in overrides)
             {
-                var key = NormalizeName(rawKey);
+                var key = NameNormalizer.Normalize(rawKey);
                 if (!string.IsNullOrEmpty(key))
                     dict[key] = new PriceEntry(entry.DivineValue, entry.ExaltedValue);
             }
@@ -168,18 +252,12 @@ internal sealed class PriceRepository : IDisposable
         }
     }
 
-    internal static string NormalizeName(string name)
-    {
-        var s = name.ToLowerInvariant();
-        s = Regex.Replace(s, @"[^\w\s]", " ");
-        s = Regex.Replace(s, @"\s+", " ");
-        return s.Trim();
-    }
-
     public void Dispose()
     {
+        _cts.Cancel();
         _timer?.Dispose();
         _timer = null;
+        _cts.Dispose();
     }
 
     private sealed class CustomPriceEntry

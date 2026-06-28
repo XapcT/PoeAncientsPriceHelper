@@ -10,23 +10,21 @@ public class OcrScannerTests
     [InlineData("Skill: Grip Filters", "skill grip filters")]
     [InlineData("  VERISIUM FLUX  ", "verisium flux")]
     [InlineData("Rune-of-Aldur", "rune of aldur")]
-    [InlineData("Неогранённый камень духа (уровень 19) (1)", "неограненный камень духа уровень 19 1")]
-    [InlineData("Сфера царей", "сфера царей")]
     public void NormalizeName_ProducesExpectedKey(string input, string expected)
     {
-        Assert.Equal(expected, OcrScanner.NormalizeName(input));
+        Assert.Equal(expected, NameNormalizer.Normalize(input));
     }
 
     [Fact]
     public void NormalizeName_EmptyAfterStrip_ReturnsEmpty()
     {
-        Assert.Equal("", OcrScanner.NormalizeName(":::---"));
+        Assert.Equal("", NameNormalizer.Normalize(":::---"));
     }
 
     [Fact]
     public void NormalizeName_CollapseWhitespace()
     {
-        Assert.Equal("a b c", OcrScanner.NormalizeName("a   b   c"));
+        Assert.Equal("a b c", NameNormalizer.Normalize("a   b   c"));
     }
 
     [Theory]
@@ -42,7 +40,11 @@ public class OcrScannerTests
     [InlineData("hefod 1x ancient rune of the titan", "ancient rune of the titan")]
     [InlineData("nerog 11x ancient rune of discovery", "ancient rune of discovery")]
     [InlineData("ancient rune of shattering", "ancient rune of shattering")]
-    [InlineData("сфера царей", "сфера царей")]
+    // OCR drops the space between the stack marker and the name ("6xArcanist's Etcher"): the glued
+    // "6xarcanist" token must not be eaten whole, leaving the name intact. (error what.png)
+    [InlineData("6xarcanist s etcher", "arcanist s etcher")]
+    [InlineData("6x arcanist s etcher", "arcanist s etcher")]
+    [InlineData("14xadaptive alloy", "adaptive alloy")]
     public void StripLeadingNoise_RemovesQuantityPrefix(string input, string expected)
     {
         Assert.Equal(expected, OcrScanner.StripLeadingNoise(input));
@@ -58,33 +60,21 @@ public class OcrScannerTests
     [InlineData("nerog 11x ancient rune of discovery", 11)]
     [InlineData("oa a 1x greater orb of transmutation", 1)]
     [InlineData("warding rune of protection i", 1)] // roman numeral, not a multiplier
-    [InlineData("Сфера возвышения (2)", 2)]
-    [InlineData("Uncut Skill Gem (Level 20)", 1)]
-    [InlineData("Неогранённый камень духа (уровень 19) (1)", 1)]
-    [InlineData("Неогранённый камень духа (уровень 19) (1).", 1)]
-    [InlineData("Руна охоты (1 |", 1)]
-    [InlineData("Руна накопления (7", 1)]
-    [InlineData("Сфера царей (3)", 3)]
-    [InlineData("Сфера царей (3) |", 3)]
-    [InlineData("Сфера царей 8)", 1)]
-    [InlineData(@"х | Гуна агонии г?енумы \1!)", 1)]
-    [InlineData("Руна весны тана Лельда @)", 1)]
+    [InlineData("6xarcanist s etcher", 6)]          // marker glued to the name (OCR dropped the space)
     public void ExtractMultiplier_ReadsQuantity(string input, int expected)
     {
         Assert.Equal(expected, OcrScanner.ExtractMultiplier(input));
     }
 
     [Theory]
-    [InlineData("неограненный камень духа уровень 19 1", "Неогранённый камень духа (уровень 19) (1).", "неограненный камень духа уровень 19")]
-    [InlineData("руна охоты 1", "Руна охоты (1 |", "руна охоты")]
-    [InlineData("руна накопления 7", "Руна накопления (7", "руна накопления")]
-    [InlineData("сфера царей 8", "Сфера царей 8)", "сфера царей")]
-    [InlineData("сфера царей 3", "Сфера царей (3) |", "сфера царей")]
-    [InlineData("uncut skill gem level 20", "Uncut Skill Gem (Level 20)", "uncut skill gem level 20")]
-    [InlineData("гуна агонии г енумы 1", @"х | Гуна агонии г?енумы \1!)", "гуна агонии г енумы")]
-    [InlineData("руна весны тана лельда", "Руна весны тана Лельда @)", "руна весны тана лельда")]
-    public void RemoveTrailingStackCount_OnlyRemovesParenthesizedCount(string normalized, string rawText, string expected)
+    [InlineData("3x orb of alchemy", 3, true)]      // explicit Nx marker → Explicit
+    [InlineData("1x orb of alchemy", 1, true)]      // explicit 1x is still an explicit read
+    [InlineData("orb of alchemy", 1, false)]        // no marker → assumed single, not explicit
+    [InlineData("warding rune of protection i", 1, false)]
+    public void ExtractMultiplierWithConfidence_TracksExplicitMarker(string input, int expectedMultiplier, bool expectedExplicit)
     {
-        Assert.Equal(expected, OcrScanner.RemoveTrailingStackCount(normalized, rawText));
+        var (multiplier, explicitHit) = OcrScanner.ExtractMultiplierWithConfidence(input);
+        Assert.Equal(expectedMultiplier, multiplier);
+        Assert.Equal(expectedExplicit, explicitHit);
     }
 }

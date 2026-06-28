@@ -10,6 +10,13 @@ namespace PoeAncientsPriceHelper;
 public partial class App : System.Windows.Application
 {
     internal static bool DebugMode { get; private set; }
+
+    // Set by MainWindow once an update is downloaded/staged. Held statically (not read off MainWindow)
+    // because under ShutdownMode=OnMainWindowClose the main window is already closed when OnExit runs,
+    // so Application.MainWindow is null there — reading it always missed the staged update and the
+    // silent on-exit apply never fired (#14).
+    internal static Velopack.UpdateManager? PendingUpdateManager;
+    internal static Velopack.UpdateInfo? PendingUpdate;
     private TaskPoolGlobalHook? _hook;
     private bool _leftCtrlDown;
 
@@ -59,6 +66,14 @@ public partial class App : System.Windows.Application
         ScanEngine.RequestDismiss();     // keep it hidden until the panel actually closes
     }
 
+    // ESC / Left-Ctrl+click also dismiss the rumour overlay: hide it now and latch it dismissed so the
+    // WORLD-gated loop keeps it hidden until the rumour panel actually closes (then it re-arms).
+    private static void DismissRumour()
+    {
+        RumourOverlayManager.HideNow();
+        RumourScanEngine.RequestDismiss();
+    }
+
     [DllImport("kernel32.dll")] private static extern bool AllocConsole();
     [DllImport("kernel32.dll")] private static extern bool AttachConsole(int dwProcessId);
 
@@ -96,7 +111,7 @@ public partial class App : System.Windows.Application
         {
             if (_capturing) return;   // rebind in progress: swallow keys from their normal actions
             // ESC closes the in-game panel — hide the overlay the instant the key goes down.
-            if (ev.Data.KeyCode == KeyCode.VcEscape) DismissOverlay();
+            if (ev.Data.KeyCode == KeyCode.VcEscape) { DismissOverlay(); DismissRumour(); }
             else if (ev.Data.KeyCode is KeyCode.VcLeftControl) _leftCtrlDown = true;
         };
         _hook.KeyReleased += (_, ev) =>
@@ -107,13 +122,16 @@ public partial class App : System.Windows.Application
             if (code == _debugKey) PriceOverlayManager.ToggleDebug();
             else if (code == _calibrateKey) InvokeCalibrate();
             else if (code == _startStopKey) InvokeStartStopToggle();
+            // Debug-only one-shot rumour read (#34 spine). F8 triggers a full-screen detect + overlay;
+            // the WORLD-gated auto-detect loop (#35) supersedes this manual trigger.
+            else if (DebugMode && code == KeyCode.VcF8) InvokeRumourScan();
             else if (code is KeyCode.VcLeftControl) _leftCtrlDown = false;
         };
         // Left-Ctrl + left click (the in-game "purchase" gesture) also dismisses the overlay.
         _hook.MousePressed += (_, ev) =>
         {
             if (_capturing) return;
-            if (ev.Data.Button == MouseButton.Button1 && _leftCtrlDown) DismissOverlay();
+            if (ev.Data.Button == MouseButton.Button1 && _leftCtrlDown) { DismissOverlay(); DismissRumour(); }
         };
         _ = _hook.RunAsync();
     }
@@ -166,8 +184,30 @@ public partial class App : System.Windows.Application
     private static void InvokeCalibrate() =>
         Current?.Dispatcher.BeginInvoke(() => (Current.MainWindow as MainWindow)?.RunCalibration());
 
+    private static void InvokeRumourScan() =>
+        Current?.Dispatcher.BeginInvoke(() => (Current.MainWindow as MainWindow)?.RunRumourScanOnce());
+
     protected override void OnExit(ExitEventArgs e)
     {
+        // If an update was staged this session but the user didn't click "Update now", apply it
+        // silently as we close so the next launch is already on the new version. Update.exe waits for
+        // this process to exit, swaps current\, and does NOT relaunch (the user chose to quit).
+        // Best-effort: if nothing is staged or the updater isn't available, just exit normally.
+        try
+        {
+            if (PendingUpdateManager is { } mgr && PendingUpdate is { } update)
+            {
+                AppPaths.LogUpdate($"OnExit: applying staged v{update.TargetFullRelease.Version} (WaitExitThenApplyUpdates)");
+                mgr.WaitExitThenApplyUpdates(update, silent: true, restart: false);
+                AppPaths.LogUpdate("OnExit: WaitExitThenApplyUpdates returned (Update.exe will swap after exit)");
+            }
+            else
+            {
+                AppPaths.LogUpdate("OnExit: nothing staged to apply");
+            }
+        }
+        catch (Exception ex) { AppPaths.LogUpdate($"OnExit: apply failed: {ex.GetType().Name}: {ex.Message}"); }
+
         _hook?.Dispose();
         _instanceMutex?.Dispose();
         base.OnExit(e);
@@ -192,9 +232,38 @@ public partial class App : System.Windows.Application
         catch { /* best-effort focus; the guard still prevents the second instance */ }
     }
 
+    // Relaunch with --debug so a user can capture diagnostics (scan_log.txt / debug_ocr.png) for a bug
+    // report — the old debug.cmd no longer ships with the Velopack build, so this is the only in-app way
+    // to turn logging on. The single-instance mutex is released first, on the UI thread that created it
+    // (the same thread as the caller), so the relaunched copy can take it; otherwise it would treat us as
+    // the running instance, focus our window, and exit — leaving nothing running. If the spawn fails we
+    // re-acquire the mutex so the guard is restored and the still-running app stays single-instance.
+    // Returns false if the exe path is unknown or the process failed to start.
+    internal static bool RelaunchWithDebug()
+    {
+        var exe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exe)) return false;
+
+        try { _instanceMutex?.ReleaseMutex(); } catch { /* not owned / already released */ }
+        _instanceMutex?.Dispose();
+        _instanceMutex = null;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(exe, "--debug") { UseShellExecute = true });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Diagnostics] relaunch with --debug failed: {ex.Message}");
+            _instanceMutex = new Mutex(initiallyOwned: true, InstanceMutexName, out _);   // restore the guard
+            return false;
+        }
+    }
+
     private static void RunOcrTest(string imagePath)
     {
-        var outPath = System.IO.Path.Combine(AppContext.BaseDirectory, "ocr_test.txt");
+        var outPath = System.IO.Path.Combine(AppPaths.DataDir, "ocr_test.txt");
         var lines = new List<string>();
         void Out(string s) => lines.Add(s);
         try
@@ -213,8 +282,7 @@ public partial class App : System.Windows.Application
             using (var g = System.Drawing.Graphics.FromImage(region))
                 g.DrawImage(full, new System.Drawing.Rectangle(0, 0, rect.Width, rect.Height), rect, System.Drawing.GraphicsUnit.Pixel);
 
-            var tessdata = System.IO.Path.Combine(AppContext.BaseDirectory, "tessdata");
-            using var scanner = new OcrScanner(tessdata, Out);
+            var scanner = new OcrScanner(Out, debug: true);   // --ocr-test wants the dump
             var rows = scanner.Scan(region);
             Out($"[ocr-test] merged {rows.Count} rows:");
             foreach (var row in rows)

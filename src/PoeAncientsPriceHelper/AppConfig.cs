@@ -24,8 +24,26 @@ internal sealed class AppConfig
     public string StartStopHotkey { get; set; } = "VcF5";
     public string DebugHotkey { get; set; } = "VcF3";
     public string CalibrateHotkey { get; set; } = "VcF4";
-    public string ReferencePixelColor { get; set; } = "#000000"; // kept for JSON backwards compat, unused
     public string CustomPricesPath { get; set; } = "custom_prices.json";
+    // "GDI" forces legacy BitBlt; any other value uses WGC (GPU capture) with GDI fallback.
+    public string CaptureBackend { get; set; } = "Auto";
+    // PoE 2 client language (#29). The locale code whose name map is loaded to translate OCR'd item
+    // names into the English keys poe.ninja prices by. This fork ships for the Russian client, so new
+    // and old configs with no saved language default to ru. Users can still switch to en/de/fr/pt/sp.
+    public string GameLanguage { get; set; } = "ru";
+    // UI theme preset name. Default "Toxic" (dark green gradient).
+    public string Theme { get; set; } = "Toxic";
+    // When true (and a region is calibrated), launching the app auto-starts scanning and minimizes to
+    // the tray — "just open it and it runs". Missing in older configs → true (the new default behaviour).
+    // Skipped under --debug so a troubleshooting session keeps the window and console visible.
+    public bool AutoStart { get; set; } = true;
+
+    // Island Rumour helper (#36). Enabled by default; when off, the WORLD-gated auto-detect loop is
+    // fully idle (no gate check, no OCR). Missing in older configs → the initializer keeps these
+    // defaults (Newtonsoft only overwrites keys present in the file), exactly like AutoStart above.
+    public bool RumourHelperEnabled { get; set; } = true;
+    // How often the full-screen rumour detect runs WHILE on the Atlas map (ms). Clamped on use.
+    public int RumourScanIntervalMs { get; set; } = 1800;
 
     public Rectangle RegionRect
     {

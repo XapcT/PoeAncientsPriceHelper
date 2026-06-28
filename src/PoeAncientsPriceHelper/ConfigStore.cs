@@ -4,77 +4,35 @@ namespace PoeAncientsPriceHelper;
 
 internal static class ConfigStore
 {
-    private const string ConfigFileName = "config.json";
-    private const string AppDataFolderName = "PoeAncientsPriceHelper";
+    private const string FileName = "config.json";
 
-    private static string ConfigPath =>
-        Path.Combine(GetConfigDirectory(), ConfigFileName);
-
-    private static string LegacyConfigPath =>
-        Path.Combine(AppContext.BaseDirectory, ConfigFileName);
-
-    public static AppConfig Load()
-        => LoadFromPaths(ConfigPath, LegacyConfigPath);
-
-    public static void Save(AppConfig config)
-        => SaveToPath(ConfigPath, config);
-
-    internal static AppConfig LoadFromPaths(string configPath, string legacyConfigPath)
+    // dir defaults to the folder next to the exe. It's overridable purely so tests can point at a
+    // temp directory and exercise the *real* Load/Save logic instead of reimplementing it.
+    public static AppConfig Load(string? dir = null)
     {
-        if (File.Exists(configPath))
-        {
-            return TryLoad(configPath, out var config) ? config : new AppConfig();
-        }
-
-        if (!File.Exists(legacyConfigPath)) return new AppConfig();
-        if (!TryLoad(legacyConfigPath, out var legacyConfig)) return new AppConfig();
-
-        TrySave(configPath, legacyConfig);
-        return legacyConfig;
-    }
-
-    internal static void SaveToPath(string configPath, AppConfig config)
-        => TrySave(configPath, config);
-
-    private static string GetConfigDirectory()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return string.IsNullOrWhiteSpace(appData)
-            ? AppContext.BaseDirectory
-            : Path.Combine(appData, AppDataFolderName);
-    }
-
-    private static bool TryLoad(string configPath, out AppConfig config)
-    {
-        config = new AppConfig();
-
+        var path = PathFor(dir);
         try
         {
-            var json = File.ReadAllText(configPath);
-            config = JsonConvert.DeserializeObject<AppConfig>(json) ?? new AppConfig();
-            return true;
+            if (!File.Exists(path)) return new AppConfig();
+            return JsonConvert.DeserializeObject<AppConfig>(File.ReadAllText(path)) ?? new AppConfig();
         }
-        catch
-        {
-            return false;
-        }
+        catch { return new AppConfig(); }
     }
 
-    private static bool TrySave(string configPath, AppConfig config)
+    public static void Save(AppConfig config, string? dir = null)
     {
-        try
-        {
-            var dir = Path.GetDirectoryName(configPath);
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
-            var json = JsonConvert.SerializeObject(config, Formatting.Indented);
-            File.WriteAllText(configPath, json);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        var path = PathFor(dir);
+        var json = JsonConvert.SerializeObject(config, Formatting.Indented);
+        // Write to a sibling temp file, then rename over the target. A crash mid-write can then only
+        // corrupt the throwaway .tmp, never config.json — otherwise a truncated file makes Load fall
+        // back to defaults and the user silently loses their calibration. File.Replace is the atomic
+        // swap but needs an existing target, so the very first save just moves the temp into place.
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, json);
+        if (File.Exists(path)) File.Replace(tmp, path, null);
+        else File.Move(tmp, path);
     }
+
+    private static string PathFor(string? dir) =>
+        Path.Combine(dir ?? AppPaths.DataDir, FileName);
 }
