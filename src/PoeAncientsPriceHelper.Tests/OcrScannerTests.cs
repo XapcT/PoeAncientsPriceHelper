@@ -40,6 +40,11 @@ public class OcrScannerTests
     [InlineData("hefod 1x ancient rune of the titan", "ancient rune of the titan")]
     [InlineData("nerog 11x ancient rune of discovery", "ancient rune of discovery")]
     [InlineData("ancient rune of shattering", "ancient rune of shattering")]
+    // OCR drops the space between the stack marker and the name ("6xArcanist's Etcher"): the glued
+    // "6xarcanist" token must not be eaten whole, leaving the name intact. (error what.png)
+    [InlineData("6xarcanist s etcher", "arcanist s etcher")]
+    [InlineData("6x arcanist s etcher", "arcanist s etcher")]
+    [InlineData("14xadaptive alloy", "adaptive alloy")]
     public void StripLeadingNoise_RemovesQuantityPrefix(string input, string expected)
     {
         Assert.Equal(expected, OcrScanner.StripLeadingNoise(input));
@@ -55,6 +60,7 @@ public class OcrScannerTests
     [InlineData("nerog 11x ancient rune of discovery", 11)]
     [InlineData("oa a 1x greater orb of transmutation", 1)]
     [InlineData("warding rune of protection i", 1)] // roman numeral, not a multiplier
+    [InlineData("6xarcanist s etcher", 6)]          // marker glued to the name (OCR dropped the space)
     public void ExtractMultiplier_ReadsQuantity(string input, int expected)
     {
         Assert.Equal(expected, OcrScanner.ExtractMultiplier(input));

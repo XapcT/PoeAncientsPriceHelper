@@ -29,9 +29,16 @@ internal sealed class OcrScanner
     // Pre-compiled regexes for StripLeadingNoise / ExtractMultiplier — these run on every OCR'd
     // line (~every 100ms while a panel is open), so avoiding the per-call recompile is a meaningful
     // saving on the hot path. (NormalizeName's regexes live in NameNormalizer.)
-    private static readonly Regex MultiplierPattern = new(@"(?<![a-z0-9])(\d{1,3})\s*x(?![a-z0-9])", RegexOptions.Compiled);
+    // The 'x' may be glued straight onto the name when OCR drops the space ("6xArcanist's Etcher"),
+    // so the marker is allowed to be followed by a letter — only a trailing DIGIT is rejected (that
+    // would be an ambiguous "6x5", not a stack marker).
+    private static readonly Regex MultiplierPattern = new(@"(?<![a-z0-9])(\d{1,3})\s*x(?![0-9])", RegexOptions.Compiled);
     private static readonly Regex LeadingNoise = new(@"^(?:\S{1,2}\s+|\S*\d\S*\s+)+", RegexOptions.Compiled);
     private static readonly Regex QuantityMarker = new(@"(?<!\w)\d+\s*x\s+", RegexOptions.Compiled);
+    // A stack marker at the very start, possibly glued to the name ("6xarcanist s etcher"). Stripped
+    // BEFORE LeadingNoise, whose digit-token rule would otherwise swallow "6xarcanist" whole and
+    // destroy the item name. Mirrors MultiplierPattern's "letter ok, trailing digit not" boundary.
+    private static readonly Regex LeadingQuantity = new(@"^\s*\d{1,3}\s*x(?![0-9])", RegexOptions.Compiled);
     private static readonly Regex LeadingNonAlpha = new(@"^[^a-z]+", RegexOptions.Compiled);
 
     // debug gates the diagnostic debug_ocr.png dump (see Scan) and CLI OCR-test raw-line logging.
@@ -241,13 +248,18 @@ internal sealed class OcrScanner
         return (1, false);
     }
 
-    // Strip leading noise: short/numeric tokens ("e", "l8"), then anything before the first
-    // quantity marker ("1x", "11x"), then remaining leading non-alpha chars.
-    // e.g. "krogin 1x ancient rune of decay"  → "ancient rune of decay"
-    // e.g. "e l8 n 1x the greatwolf"          → "the greatwolf"
+    // Strip leading noise: a glued stack marker ("6xarcanist…"), then short/numeric tokens ("e",
+    // "l8"), then anything before the first quantity marker ("1x", "11x"), then remaining leading
+    // non-alpha chars.
+    // e.g. "6x arcanist s etcher" / "6xarcanist s etcher" → "arcanist s etcher"
+    // e.g. "krogin 1x ancient rune of decay"             → "ancient rune of decay"
+    // e.g. "e l8 n 1x the greatwolf"                      → "the greatwolf"
     internal static string StripLeadingNoise(string normalized)
     {
-        var s = LeadingNoise.Replace(normalized, "");
+        // Remove a leading "Nx" first — even when OCR glued it to the name. LeadingNoise's digit-token
+        // rule would otherwise eat the whole "6xarcanist" token and leave only "s etcher".
+        var s = LeadingQuantity.Replace(normalized, "");
+        s = LeadingNoise.Replace(s, "");
         // If a quantity marker still exists, drop everything before (and including) it
         var qm = QuantityMarker.Match(s);
         if (qm.Success) s = s.Substring(qm.Index + qm.Length);
