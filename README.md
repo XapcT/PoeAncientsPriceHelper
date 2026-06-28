@@ -11,6 +11,7 @@
 - Распознает русские названия валюты, рун, сплавов, расплавов и неограненных камней.
 - Использует Windows OCR и Windows Graphics Capture, без Tesseract и внешних OCR-моделей.
 - Хранит калибровку и настройки в `%LocalAppData%\PoeAncientsPriceHelper`, поэтому обновления их не стирают.
+- Хранит app-managed fallback русской локализации в `%LocalAppData%\PoeAncientsPriceHelper\locales\_bundled`, чтобы автообновление не ломало уже рабочие русские названия.
 - Ставит и обновляет приложение через GitHub Releases этого fork-репозитория.
 
 ## Установка

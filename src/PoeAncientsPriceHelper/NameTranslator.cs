@@ -13,8 +13,8 @@ namespace PoeAncientsPriceHelper;
 // no translation is returned unchanged, so an English client (or an already-English row) is a no-op
 // pass-through.
 //
-// Only the ONE language the user selects (Settings → Game language) is loaded; English is the default
-// and loads nothing, so an English client does zero work. Deliberately NO glyph-skeleton step here:
+// Only the ONE language the user selects (Settings -> Game language) is loaded. English loads nothing,
+// so an English client does zero work. Deliberately NO glyph-skeleton step here:
 // folding (o↔c↔e, n↔m↔u …) is aggressive enough to map one item onto another, and the accent-drop case
 // it would catch is already covered by Fold. Glyph-level OCR slips are still absorbed downstream by
 // ScanEngine's fuzzy matcher, which runs on the resolved English key.
@@ -32,10 +32,18 @@ internal sealed class NameTranslator
     // locale files are present.
     public static NameTranslator Empty { get; } = new(new Dictionary<string, string>());
 
-    // Where locale files live: the bundled locales\ folder (shipped next to the exe) and the user's
-    // %LocalAppData%\PoeAncientsPriceHelper\locales\ (drop-in contributions / overrides, loaded last).
+    private const string LocaleDirName = "locales";
+    private const string PersistedBundledDirName = "_bundled";
+
+    // Where locale files live:
+    // 1) the bundled locales\ folder shipped next to the exe,
+    // 2) the app-managed persisted fallback copied into LocalAppData (survives Velopack current\ swaps),
+    // 3) the user's LocalAppData\locales\ drop-in overrides, loaded last.
+    private static string BundledDirectory => Path.Combine(AppContext.BaseDirectory, LocaleDirName);
+    private static string UserDirectory => Path.Combine(AppPaths.DataDir, LocaleDirName);
+    private static string PersistedBundledDirectory => Path.Combine(UserDirectory, PersistedBundledDirName);
     private static IEnumerable<string> DefaultDirectories =>
-        [Path.Combine(AppContext.BaseDirectory, "locales"), Path.Combine(AppPaths.DataDir, "locales")];
+        [BundledDirectory, PersistedBundledDirectory, UserDirectory];
 
     // A locale offered in the settings "Game language" dropdown.
     public sealed record LocaleInfo(string Code, string DisplayName);
@@ -45,7 +53,9 @@ internal sealed class NameTranslator
     // carries no risk of a foreign entry shadowing an English row. Only that language's file is loaded
     // (bundled + any user override of the same code), which keeps the match set small and predictable —
     // unlike merging every language at once.
-    public static NameTranslator ForLanguage(string? code)
+    public static NameTranslator ForLanguage(string? code) => ForLanguage(code, DefaultDirectories);
+
+    internal static NameTranslator ForLanguage(string? code, IEnumerable<string> directories)
     {
         if (string.IsNullOrWhiteSpace(code) || code.Equals("en", StringComparison.OrdinalIgnoreCase))
             return Empty;
@@ -66,6 +76,45 @@ internal sealed class NameTranslator
             catch { /* a broken contribution must never crash scanning — skip it */ }
         }
         return FromPairs(pairs);
+    }
+
+    // Keep a known-good Russian locale outside Velopack's install folder. Updates replace current\
+    // wholesale, but they leave AppPaths.DataDir alone, so this protects the RU fork from an update
+    // that accidentally removes or breaks the bundled ru.json. Existing valid fallbacks are preserved:
+    // a newer app can add translations through its bundled file, while the persisted file remains the
+    // last-resort safety net for names that used to work.
+    public static void EnsurePersistentFallbacks(Action<string>? log = null) =>
+        EnsurePersistentFallback("ru", BundledDirectory, UserDirectory, log);
+
+    internal static bool EnsurePersistentFallback(
+        string code, string bundledDirectory, string userDirectory, Action<string>? log = null)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return false;
+
+        var source = Path.Combine(bundledDirectory, code + ".json");
+        if (!IsUsableLocaleFile(source, code))
+        {
+            log?.Invoke($"locale fallback {code}: bundled source missing or invalid");
+            return false;
+        }
+
+        var targetDir = Path.Combine(userDirectory, PersistedBundledDirName);
+        var target = Path.Combine(targetDir, code + ".json");
+        if (IsUsableLocaleFile(target, code))
+            return false;
+
+        try
+        {
+            Directory.CreateDirectory(targetDir);
+            File.Copy(source, target, overwrite: true);
+            log?.Invoke($"locale fallback {code}: copied to {target}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"locale fallback {code}: copy failed: {ex.Message}");
+            return false;
+        }
     }
 
     // Discover the locale files present (bundled + user) so the settings UI can list the languages the
@@ -122,6 +171,22 @@ internal sealed class NameTranslator
             else result[key] = en;
         }
         return result;
+    }
+
+    private static bool IsUsableLocaleFile(string path, string expectedCode)
+    {
+        if (!File.Exists(path)) return false;
+        try
+        {
+            var locale = JsonConvert.DeserializeObject<LocaleFile>(File.ReadAllText(path));
+            if (locale?.Entries is not { Count: > 0 }) return false;
+            return string.IsNullOrWhiteSpace(locale.Code)
+                   || locale.Code.Equals(expectedCode, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // Resolve an OCR'd, already-normalized name to its English price key. Returns the input unchanged

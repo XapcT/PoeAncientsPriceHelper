@@ -94,9 +94,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 @"
 ## What's new
 
-- Merged upstream v3.5.0 into the Russian fork.
-- Russian client support is enabled by default and ships corrected RU locale entries.
-- Auto-updates use XapcT/PoeAncientsPriceHelper GitHub Releases.
+- Added a persisted Russian locale fallback outside Velopack's current folder.
+- Russian name translation now survives future installer updates even if bundled locale files are removed or broken.
+- Auto-updates continue to use XapcT/PoeAncientsPriceHelper GitHub Releases.
 
 ## Install
 

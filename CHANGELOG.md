@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.5.2] — 2026-06-28
+
+### Fixed
+
+- Added a persisted Russian locale fallback in `%LocalAppData%\PoeAncientsPriceHelper\locales\_bundled\ru.json`.
+- Russian name translation now survives future installer updates even if the bundled `current\locales\ru.json` is accidentally removed or broken.
+
 ## [3.5.1] — 2026-06-28
 
 ### Changed

@@ -61,6 +61,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        NameTranslator.EnsurePersistentFallbacks(AppPaths.LogUpdate);
         _config = ConfigStore.Load();
         PopulateFields();
         // When already running in debug mode the relaunch is pointless — repurpose the link to open the

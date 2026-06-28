@@ -50,6 +50,65 @@ public class LocaleFilesTests
         Assert.Equal(expectedKey, NameTranslator.ForLanguage("ru").Translate(localized));
     }
 
+    [Fact]
+    public void PersistentFallback_IsCopiedFromBundledRu_WhenMissing()
+    {
+        using var dir = new TempDir();
+        var bundled = Path.Combine(dir.Path, "bundled");
+        var user = Path.Combine(dir.Path, "user", "locales");
+        Directory.CreateDirectory(bundled);
+
+        File.Copy(Path.Combine(LocalesDir, "ru.json"), Path.Combine(bundled, "ru.json"));
+
+        Assert.True(NameTranslator.EnsurePersistentFallback("ru", bundled, user));
+
+        var fallback = Path.Combine(user, "_bundled", "ru.json");
+        Assert.True(File.Exists(fallback));
+        Assert.Equal("chaos orb", NameTranslator.ForLanguage("ru", [Path.GetDirectoryName(fallback)!])
+            .Translate("сфера хаоса"));
+    }
+
+    [Fact]
+    public void PersistentFallback_IsUsed_WhenBundledLocaleIsUnavailable()
+    {
+        using var dir = new TempDir();
+        var fallbackDir = Path.Combine(dir.Path, "locales", "_bundled");
+        Directory.CreateDirectory(fallbackDir);
+        File.Copy(Path.Combine(LocalesDir, "ru.json"), Path.Combine(fallbackDir, "ru.json"));
+
+        var translator = NameTranslator.ForLanguage("ru", [Path.Combine(dir.Path, "missing"), fallbackDir]);
+
+        Assert.Equal("chaos orb", translator.Translate("сфера хаоса"));
+        Assert.Equal("ward rune", translator.Translate("руна барьера"));
+    }
+
+    [Fact]
+    public void PersistentFallback_DoesNotOverwriteExistingValidFallback()
+    {
+        using var dir = new TempDir();
+        var bundled = Path.Combine(dir.Path, "bundled");
+        var user = Path.Combine(dir.Path, "user", "locales");
+        var fallbackDir = Path.Combine(user, "_bundled");
+        Directory.CreateDirectory(bundled);
+        Directory.CreateDirectory(fallbackDir);
+
+        File.Copy(Path.Combine(LocalesDir, "ru.json"), Path.Combine(bundled, "ru.json"));
+        var fallback = Path.Combine(fallbackDir, "ru.json");
+        File.WriteAllText(fallback, """
+        {
+          "language": "Русский (Russian)",
+          "code": "ru",
+          "entries": {
+            "Chaos Orb": "Старое рабочее имя"
+          }
+        }
+        """);
+
+        Assert.False(NameTranslator.EnsurePersistentFallback("ru", bundled, user));
+        Assert.Contains("Старое рабочее имя", File.ReadAllText(fallback));
+        Assert.DoesNotContain("Сфера хаоса", File.ReadAllText(fallback));
+    }
+
     // The settings dropdown is populated from the files actually present — de/fr/pt/ru/sp, never "en".
     [Fact]
     public void AvailableLocales_ListsTheSeededLanguages()
