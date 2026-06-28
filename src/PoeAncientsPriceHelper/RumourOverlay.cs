@@ -78,7 +78,7 @@ internal sealed class RumourOverlayForm : Form
     private readonly Font _headerFont = new("Segoe UI", 10, FontStyle.Bold);
     private Bitmap? _buffer;
 
-    private static readonly string[] Headers = ["Rumour", "Map", "Mods", "Rating"];
+    private static readonly string[] Headers = ["Слух", "Карта", "Моды", "Рейтинг"];
 
     private const int Gap = 16;       // gap between panel and overlay
     private const int PadX = 12;
@@ -198,7 +198,7 @@ internal sealed class RumourOverlayForm : Form
                     RumourRating.Color(RumourRating.Tier(e.Rating))));
             else
                 rows.Add((
-                    App.DebugMode ? $"unknown  <- {row.OcrName}" : "unknown rumour",
+                    App.DebugMode ? $"неизвестно  <- {row.OcrName}" : "неизвестный слух",
                     "", "", "?",
                     RumourRating.Color(RatingTier.Unknown)));
         }

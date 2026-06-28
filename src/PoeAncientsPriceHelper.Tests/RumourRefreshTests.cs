@@ -72,7 +72,7 @@ public class RumourRefreshTests
         Assert.False(result.Success);
         Assert.Null(result.Repository);
         Assert.False(File.Exists(cache));   // nothing cached on failure
-        Assert.Contains("bundled", result.Message);
+        Assert.Contains("встроенные данные", result.Message);
     }
 
     [Fact]

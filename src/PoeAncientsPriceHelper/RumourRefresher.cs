@@ -9,7 +9,7 @@ namespace PoeAncientsPriceHelper;
 internal sealed record RumourRefreshResult(bool Success, int Count, string Message, RumourRepository? Repository = null)
 {
     public static RumourRefreshResult Ok(RumourRepository repo, int count) =>
-        new(true, count, $"Updated — {count} rumours loaded from the sheet.", repo);
+        new(true, count, $"Обновлено: загружено слухов из таблицы - {count}.", repo);
 
     public static RumourRefreshResult Failed(string message) => new(false, 0, message);
 }
@@ -32,7 +32,7 @@ internal static class RumourRefresher
             var csv = await http.GetStringAsync(CsvUrl, ct);
             var entries = RumourCsv.Parse(csv);
             if (entries.Count == 0)
-                return RumourRefreshResult.Failed("The sheet returned no rumours — keeping current data.");
+                return RumourRefreshResult.Failed("Таблица не вернула слухи - оставлены текущие данные.");
 
             // Persist a cache the loader prefers next launch. A cache-write failure must not lose the
             // in-memory refresh, so it's best-effort.
@@ -50,7 +50,7 @@ internal static class RumourRefresher
         }
         catch (Exception ex)
         {
-            return RumourRefreshResult.Failed($"Refresh failed ({ex.GetType().Name}) — using bundled data.");
+            return RumourRefreshResult.Failed($"Не удалось обновить ({ex.GetType().Name}) - используются встроенные данные.");
         }
     }
 }

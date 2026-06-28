@@ -42,8 +42,8 @@ public partial class SettingsWindow : Window
         // Two backends: "GDI" forces legacy BitBlt; anything else is WGC (GPU) with GDI fallback.
         // Tag carries the value persisted to config.CaptureBackend.
         CaptureBox.Items.Clear();
-        CaptureBox.Items.Add(new ComboBoxItem { Content = "Auto (GPU + fallback)", Tag = "Auto" });
-        CaptureBox.Items.Add(new ComboBoxItem { Content = "Legacy (GDI)", Tag = "GDI" });
+        CaptureBox.Items.Add(new ComboBoxItem { Content = "Авто (GPU + fallback)", Tag = "Auto" });
+        CaptureBox.Items.Add(new ComboBoxItem { Content = "Старый режим (GDI)", Tag = "GDI" });
         CaptureBox.SelectedIndex = _config.CaptureBackend == "GDI" ? 1 : 0;
 
         // Game language (#29): English (no translation) first, then every locale file the app found.
@@ -51,7 +51,7 @@ public partial class SettingsWindow : Window
         // it on next start. This fork's default config selects ru; unknown saved codes fall back to
         // English for display.
         LanguageBox.Items.Clear();
-        LanguageBox.Items.Add(new ComboBoxItem { Content = "English (default)", Tag = "en" });
+        LanguageBox.Items.Add(new ComboBoxItem { Content = "Английский (без перевода)", Tag = "en" });
         foreach (var loc in NameTranslator.AvailableLocales())
             LanguageBox.Items.Add(new ComboBoxItem { Content = loc.DisplayName, Tag = loc.Code });
         var langItems = LanguageBox.Items.Cast<ComboBoxItem>().ToList();
@@ -66,9 +66,9 @@ public partial class SettingsWindow : Window
         // (the stored value is left untouched until the user picks one).
         RumourEnabledBox.IsChecked = _config.RumourHelperEnabled;
         RumourIntervalBox.Items.Clear();
-        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Fast (1.2s)", Tag = 1200 });
-        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Normal (1.8s)", Tag = 1800 });
-        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Relaxed (3s)", Tag = 3000 });
+        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Быстро (1.2 с)", Tag = 1200 });
+        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Обычно (1.8 с)", Tag = 1800 });
+        RumourIntervalBox.Items.Add(new ComboBoxItem { Content = "Спокойно (3 с)", Tag = 3000 });
         var items = RumourIntervalBox.Items.Cast<ComboBoxItem>().ToList();
         RumourIntervalBox.SelectedItem =
             items.FirstOrDefault(i => (int)i.Tag! == _config.RumourScanIntervalMs)
@@ -152,7 +152,7 @@ public partial class SettingsWindow : Window
     {
         if (_refreshRumours is null) return;
         RefreshRumoursButton.IsEnabled = false;
-        RumourRefreshStatus.Text = "Refreshing from sheet…";
+        RumourRefreshStatus.Text = "Обновление из таблицы...";
         try
         {
             var result = await _refreshRumours();
@@ -160,7 +160,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            RumourRefreshStatus.Text = $"Refresh failed: {ex.Message}";
+            RumourRefreshStatus.Text = $"Не удалось обновить: {ex.Message}";
         }
         finally
         {
@@ -189,7 +189,7 @@ public partial class SettingsWindow : Window
         _rebindButton = button;
         _rebindLabel = label;
         SetRebindButtonsEnabled(false);
-        button.Content = "Press a key… (Esc to cancel)";
+        button.Content = "Нажми клавишу... (Esc - отмена)";
         App.BeginHotkeyCapture(action, OnHotkeyCaptured);   // outcome arrives on the UI thread
     }
 
@@ -219,7 +219,7 @@ public partial class SettingsWindow : Window
                 break;
             case App.CaptureOutcome.Reserved:
                 if (_rebindButton is not null)
-                    _rebindButton.Content = $"{HotkeyBinding.Display(code)} is in use — try another";
+                    _rebindButton.Content = $"{HotkeyBinding.Display(code)} уже занята - выбери другую";
                 break;
             case App.CaptureOutcome.Cancelled:
                 EndRebind();
@@ -229,7 +229,7 @@ public partial class SettingsWindow : Window
 
     private void EndRebind()
     {
-        if (_rebindButton is not null) _rebindButton.Content = "Rebind";
+        if (_rebindButton is not null) _rebindButton.Content = "Сменить";
         _rebindButton = null;
         _rebindLabel = null;
         SetRebindButtonsEnabled(true);

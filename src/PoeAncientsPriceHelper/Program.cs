@@ -56,12 +56,12 @@ internal static class Program
         try
         {
             const uint MB_ICONERROR = 0x00000010;
-            var location = logPath ?? "(a crash log could not be written)";
+            var location = logPath ?? "(не удалось записать crash.log)";
             MessageBox(IntPtr.Zero,
-                $"Poe Ancients Price Helper couldn't start.\n\n{ex.GetType().Name}: {ex.Message}\n\n" +
-                $"A full report was saved to:\n{location}\n\n" +
-                "Please attach that file when reporting this on GitHub.",
-                "Poe Ancients Price Helper — startup error",
+                $"Poe Ancients Price Helper не смог запуститься.\n\n{ex.GetType().Name}: {ex.Message}\n\n" +
+                $"Полный отчет сохранен здесь:\n{location}\n\n" +
+                "Приложи этот файл к отчету об ошибке на GitHub.",
+                "Poe Ancients Price Helper - ошибка запуска",
                 MB_ICONERROR);
         }
         catch { /* the dialog is a courtesy; never let it mask the original crash */ }

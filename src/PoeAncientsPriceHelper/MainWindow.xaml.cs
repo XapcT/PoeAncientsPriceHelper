@@ -70,8 +70,8 @@ public partial class MainWindow : Window
         // window's Loaded fires).
         if (App.DebugMode)
         {
-            DiagnosticsLink.Text = "Open logs";
-            DiagnosticsLink.ToolTip = "Open the folder with scan_log.txt and debug_ocr.png";
+            DiagnosticsLink.Text = "Открыть логи";
+            DiagnosticsLink.ToolTip = "Открыть папку с scan_log.txt и debug_ocr.png";
         }
         await StartupAsync();
         InitRumourHelper();
@@ -153,7 +153,7 @@ public partial class MainWindow : Window
             var version = info.TargetFullRelease.Version;
             _ = Dispatcher.BeginInvoke(() =>
             {
-                UpdateLink.Text = $"Update now: v{version} - click to install & restart";
+                UpdateLink.Text = $"Обновить до v{version} - установить и перезапустить";
                 UpdateLink.Visibility = Visibility.Visible;
                 // Test seam (parallels POEPRICE_UPDATE_FEED): drive the real "Update now" relaunch path
                 // without a synthetic mouse click. Never set in production.
@@ -183,20 +183,20 @@ public partial class MainWindow : Window
         if (App.DebugMode) { OpenDataFolder(); return; }
 
         var choice = System.Windows.MessageBox.Show(this,
-            "Restart with diagnostics logging enabled?\n\n" +
-            "A console window will open and detailed logs (scan_log.txt and debug_ocr.png) will be " +
-            "written to your data folder so you can attach them to a bug report.\n\n" +
-            "The app will close and reopen now.",
-            "Diagnostics", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Question);
+            "Перезапустить с включенной диагностикой?\n\n" +
+            "Откроется консоль, а подробные логи (scan_log.txt и debug_ocr.png) будут записаны " +
+            "в папку данных, чтобы их можно было приложить к отчету об ошибке.\n\n" +
+            "Приложение сейчас закроется и откроется снова.",
+            "Диагностика", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Question);
         if (choice != System.Windows.MessageBoxResult.OK) return;
 
         if (App.RelaunchWithDebug())
             Close();   // routes through Window_Closing for a clean shutdown; the new --debug copy takes over
         else
             System.Windows.MessageBox.Show(this,
-                "Couldn't restart in diagnostics mode. You can launch the app from a terminal with the " +
-                "--debug switch instead.",
-                "Diagnostics", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                "Не удалось перезапустить приложение в режиме диагностики. Можно запустить его " +
+                "из терминала с параметром --debug.",
+                "Диагностика", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
     }
 
     private void OpenDataFolder()
@@ -268,12 +268,12 @@ public partial class MainWindow : Window
     {
         RegionLabel.Text = _config.IsCalibrated
             ? $"x={_config.RegionX} y={_config.RegionY} {_config.RegionWidth}×{_config.RegionHeight}"
-            : "Not calibrated";
+            : "Не откалибровано";
     }
 
     private async Task StartupAsync()
     {
-        StatusLabel.Text = "Fetching prices from poe.ninja…";
+        StatusLabel.Text = "Загрузка цен с poe.ninja...";
         StartStopButton.IsEnabled = false;
 
         // Stop the scanner before disposing the repo/icons it depends on (league change, initial load).
@@ -309,12 +309,12 @@ public partial class MainWindow : Window
         {
             _engine = new ScanEngine(_config, _repo, _icons, CreateCaptureBackend());
             _engine.Start();
-            StartStopButton.Content = "Stop";
+            StartStopButton.Content = "Стоп";
             StartStopButton.Background = System.Windows.Media.Brushes.DarkRed;
         }
         else
         {
-            StartStopButton.Content = "Start";
+            StartStopButton.Content = "Старт";
             StartStopButton.Background = System.Windows.Media.Brushes.DarkGreen;
         }
         _engineWasRunning = false;
@@ -358,12 +358,12 @@ public partial class MainWindow : Window
         if (_repo.ItemCount == 0)
         {
             StatusLabel.Foreground = StatusFailBrush;
-            StatusLabel.Text = "Failed to get prices from poe.ninja — retrying…";
+            StatusLabel.Text = "Не удалось получить цены с poe.ninja - повтор...";
             return;
         }
-        string fetched = _repo.LastFetchedAt is { } t ? t.ToString("MMM d HH:mm") : "never";
+        string fetched = _repo.LastFetchedAt is { } t ? t.ToString("dd.MM HH:mm") : "никогда";
         StatusLabel.Foreground = StatusNormalBrush;
-        StatusLabel.Text = $"{_repo.ItemCount} items loaded  ·  last fetch {fetched}";
+        StatusLabel.Text = $"Загружено предметов: {_repo.ItemCount}  ·  последнее обновление {fetched}";
     }
 
     // A fetch failed (network error or 0 items). Prices already loaded from a prior fetch are kept, so
@@ -376,14 +376,14 @@ public partial class MainWindow : Window
             if (_repo is null) return;
             if (_repo.ItemCount > 0)
             {
-                string t = _repo.LastFetchedAt is { } at ? at.ToString("MMM d HH:mm") : "earlier";
+                string t = _repo.LastFetchedAt is { } at ? at.ToString("dd.MM HH:mm") : "раньше";
                 StatusLabel.Foreground = StatusStaleBrush;
-                StatusLabel.Text = $"Couldn't refresh — retrying (showing last fetch {t})";
+                StatusLabel.Text = $"Не удалось обновить - повтор (показаны цены от {t})";
             }
             else
             {
                 StatusLabel.Foreground = StatusFailBrush;
-                StatusLabel.Text = "Failed to get prices from poe.ninja — retrying…";
+                StatusLabel.Text = "Не удалось получить цены с poe.ninja - повтор...";
             }
         });
     }
@@ -469,7 +469,7 @@ public partial class MainWindow : Window
             if (!_config.IsCalibrated || _repo is null || _icons is null) return;
             _engine = new ScanEngine(_config, _repo, _icons, CreateCaptureBackend());
             _engine.Start();
-            StartStopButton.Content = "Stop";
+            StartStopButton.Content = "Стоп";
             StartStopButton.Background = System.Windows.Media.Brushes.DarkRed;
         }
         else
@@ -477,7 +477,7 @@ public partial class MainWindow : Window
             _engine.StopAndWait(TimeSpan.FromSeconds(2));
             _engine.Dispose();
             _engine = null;
-            StartStopButton.Content = "Start";
+            StartStopButton.Content = "Старт";
             StartStopButton.Background = System.Windows.Media.Brushes.DarkGreen;
         }
     }
@@ -493,7 +493,7 @@ public partial class MainWindow : Window
         if (!_trayBalloonShown)
         {
             _trayIcon.ShowBalloonTip(3000, "Poe Ancients Price Helper",
-                "Still running — double-click the tray icon to restore.",
+                "Приложение продолжает работать - дважды нажми на значок в трее, чтобы открыть окно.",
                 System.Windows.Forms.ToolTipIcon.Info);
             _trayBalloonShown = true;
         }
@@ -514,8 +514,8 @@ public partial class MainWindow : Window
         };
         _trayIcon.DoubleClick += (_, _) => RestoreFromTray();
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Show", null, (_, _) => RestoreFromTray());
-        menu.Items.Add("Exit", null, (_, _) => ExitFromTray());
+        menu.Items.Add("Показать", null, (_, _) => RestoreFromTray());
+        menu.Items.Add("Выход", null, (_, _) => ExitFromTray());
         _trayIcon.ContextMenuStrip = menu;
     }
 

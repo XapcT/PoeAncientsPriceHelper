@@ -33,7 +33,7 @@ internal sealed class CalibrationOverlay : Form
         DoubleBuffered = true;
         KeyPreview = true;
         Cursor = Cursors.Cross;
-        Text = "PoeAncientsPriceHelper - Calibration";
+        Text = "PoeAncientsPriceHelper - калибровка";
 
         // Span the whole virtual desktop (all monitors) so the region can be drawn on any of them, not
         // just the primary (#3). On multi-monitor setups VirtualScreen.Location can be negative (a
@@ -148,7 +148,7 @@ internal sealed class CalibrationOverlay : Form
         // secondary). The selection rects are stored in physical coords, so convert them for drawing.
         var primary = Screen.PrimaryScreen!.Bounds;
         var titleAt = PointToClient(new Point(primary.Left + 30, primary.Top + 30));
-        g.DrawString("Drag a box around the item list panel, then press ENTER to confirm. ESC to cancel.",
+        g.DrawString("Выдели область списка предметов. ENTER - подтвердить, ESC - отмена.",
             titleFont, fg, titleAt.X, titleAt.Y);
 
         if (_currentDragScreen.Width > 0)
@@ -161,7 +161,7 @@ internal sealed class CalibrationOverlay : Form
             var clientRect = RectangleToClient(_confirmedRectScreen);
             using var pen2 = new Pen(Color.LimeGreen, 3);
             g.DrawRectangle(pen2, clientRect);
-            g.DrawString("Press ENTER to confirm, drag to redo", subFont, fg,
+            g.DrawString("ENTER - подтвердить, перетащи заново для исправления", subFont, fg,
                 clientRect.Left, clientRect.Bottom + 6);
         }
     }

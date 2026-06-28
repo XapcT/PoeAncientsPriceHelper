@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.5.4] — 2026-06-28
+
+### Added
+
+- Russian fork build now uses a Russian UI for the main window, settings, diagnostics, tray actions, calibration helper, rumour overlay labels, and startup error dialog.
+- Added a regression test that guards the fork against future upstream merges accidentally restoring the old English UI labels.
+
 ## [3.5.3] — 2026-06-28
 
 ### Added

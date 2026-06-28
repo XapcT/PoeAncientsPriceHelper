@@ -94,8 +94,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 @"
 ## What's new
 
-- Russian localization now refreshes ru.json directly from the fork's GitHub main branch.
-- Fresh remote locale files are stored in LocalAppData and loaded before user overrides.
+- The fork UI is now translated to Russian: main window, settings, diagnostics, tray actions, calibration, and overlays.
+- Added a regression test that guards key UI labels against accidental upstream merge regressions.
+- ru.json continues to refresh directly from this fork's main branch.
 - Auto-updates continue to use XapcT/PoeAncientsPriceHelper GitHub Releases.
 
 ## Install

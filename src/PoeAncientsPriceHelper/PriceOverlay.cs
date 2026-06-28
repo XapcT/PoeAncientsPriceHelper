@@ -279,10 +279,11 @@ internal sealed class PriceOverlayForm : Form
         // Known item with no trading data — show "no info" instead of a price.
         if (row.Meme == MemeKind.NoInfo)
         {
-            int w = (int)Math.Ceiling(g.MeasureString("no info", _debugFont).Width);
+            const string noInfoLabel = "нет данных";
+            int w = (int)Math.Ceiling(g.MeasureString(noInfoLabel, _debugFont).Width);
             DrawBackdrop(g, x, screenY, w + 4);
             using var grayBrush = new SolidBrush(Color.FromArgb(160, Color.Gray));
-            g.DrawString("no info", _debugFont, grayBrush, x + 2, screenY - _debugFont.Height / 2);
+            g.DrawString(noInfoLabel, _debugFont, grayBrush, x + 2, screenY - _debugFont.Height / 2);
             return;
         }
 
@@ -323,7 +324,7 @@ internal sealed class PriceOverlayForm : Form
 
         // Multiple items: show total, then per-each price in parentheses.
         string label = mult > 1
-            ? $"{total.ToString(fmt, inv)} ({unit.ToString(fmt, inv)} each)"
+            ? $"{total.ToString(fmt, inv)} ({unit.ToString(fmt, inv)} за шт.)"
             : total.ToString(fmt, inv);
 
         DrawBackdrop(g, x, screenY, IconSize + 2 + (int)Math.Ceiling(g.MeasureString(label, _priceFont).Width));
