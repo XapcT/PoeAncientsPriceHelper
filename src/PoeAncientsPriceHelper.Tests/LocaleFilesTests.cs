@@ -42,7 +42,12 @@ public class LocaleFilesTests
 
     [Theory]
     [InlineData("наследие альдура", "aldur s legacy")]
+    [InlineData("ьихревои сплав", "cyclonic alloy")]
+    [InlineData("сфера алхимии", "orb of alchemy")]
+    [InlineData("стекольная масса", "glassblower s bauble")]
     [InlineData("экспансивный сплав", "expansive alloy")]
+    [InlineData("сфера царей", "regal orb")]
+    [InlineData("сфера возвышения", "exalted orb")]
     [InlineData("руна перерождения", "rebirth rune")]
     [InlineData("руна барьера", "ward rune")]
     public void BundledRussianLocale_ResolvesKnownForkNames(string localized, string expectedKey)

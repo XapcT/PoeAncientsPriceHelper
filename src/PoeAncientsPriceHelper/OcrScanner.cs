@@ -39,7 +39,9 @@ internal sealed class OcrScanner
     // BEFORE LeadingNoise, whose digit-token rule would otherwise swallow "6xarcanist" whole and
     // destroy the item name. Mirrors MultiplierPattern's "letter ok, trailing digit not" boundary.
     private static readonly Regex LeadingQuantity = new(@"^\s*\d{1,3}\s*x(?![0-9])", RegexOptions.Compiled);
-    private static readonly Regex LeadingNonAlpha = new(@"^[^a-z]+", RegexOptions.Compiled);
+    private static readonly Regex LeadingNonAlpha = new(@"^[^\p{L}]+", RegexOptions.Compiled);
+    private static readonly Regex TrailingParenthesizedQuantity = new(@"\((?<n>\d{1,3}|[Зз])\)\s*$", RegexOptions.Compiled);
+    private static readonly Regex TrailingToken = new(@"\s+\S+$", RegexOptions.Compiled);
 
     // debug gates the diagnostic debug_ocr.png dump (see Scan) and CLI OCR-test raw-line logging.
     // App.DebugMode additionally enables raw-line logging for the live overlay when toggled at runtime.
@@ -186,8 +188,8 @@ internal sealed class OcrScanner
             {
                 centerY = GetLineCenterY(line, bitmapHeight, scale);
                 var normalizedRaw = NameNormalizer.Normalize(text);
-                (multiplier, multiplierExplicit) = ExtractMultiplierWithConfidence(normalizedRaw);
-                normalized = StripLeadingNoise(normalizedRaw);
+                (multiplier, multiplierExplicit) = ExtractMultiplierWithConfidence(normalizedRaw, text);
+                normalized = StripLeadingNoise(normalizedRaw, text);
                 if (normalized.Length < MinNameLength) reject = "short";
                 else if (!HasLongWord(normalized, MinWordLength)) reject = "noword";
             }
@@ -240,8 +242,11 @@ internal sealed class OcrScanner
     // versus the absent-marker fallback to 1 (Explicit=false). The caller uses that to tell a real
     // stack from an assumed single, so a pass where OCR drops the marker doesn't flip a known stack
     // back to a unit price. (See ScanEngine quantity memory.)
-    internal static (int Multiplier, bool Explicit) ExtractMultiplierWithConfidence(string normalized)
+    internal static (int Multiplier, bool Explicit) ExtractMultiplierWithConfidence(string normalized, string? rawText = null)
     {
+        if (TryParseTrailingParenthesizedQuantity(rawText, out var trailing))
+            return (trailing, true);
+
         var m = MultiplierPattern.Match(normalized);
         if (m.Success && int.TryParse(m.Groups[1].Value, out var n) && n >= 1)
             return (Math.Min(n, 999), true);
@@ -250,11 +255,12 @@ internal sealed class OcrScanner
 
     // Strip leading noise: a glued stack marker ("6xarcanist…"), then short/numeric tokens ("e",
     // "l8"), then anything before the first quantity marker ("1x", "11x"), then remaining leading
-    // non-alpha chars.
+    // non-letter chars. Runesmithing combination rows may also end with a parenthesized output count
+    // ("Orb of Alchemy (3)"), which is removed from the name and handled as the row multiplier.
     // e.g. "6x arcanist s etcher" / "6xarcanist s etcher" → "arcanist s etcher"
     // e.g. "krogin 1x ancient rune of decay"             → "ancient rune of decay"
     // e.g. "e l8 n 1x the greatwolf"                      → "the greatwolf"
-    internal static string StripLeadingNoise(string normalized)
+    internal static string StripLeadingNoise(string normalized, string? rawText = null)
     {
         // Remove a leading "Nx" first — even when OCR glued it to the name. LeadingNoise's digit-token
         // rule would otherwise eat the whole "6xarcanist" token and leave only "s etcher".
@@ -264,7 +270,27 @@ internal sealed class OcrScanner
         var qm = QuantityMarker.Match(s);
         if (qm.Success) s = s.Substring(qm.Index + qm.Length);
         s = LeadingNonAlpha.Replace(s, "");
+        if (TryParseTrailingParenthesizedQuantity(rawText, out _))
+            s = TrailingToken.Replace(s, "");
         return s.Trim();
+    }
+
+    private static bool TryParseTrailingParenthesizedQuantity(string? rawText, out int quantity)
+    {
+        quantity = 1;
+        if (string.IsNullOrWhiteSpace(rawText)) return false;
+        var m = TrailingParenthesizedQuantity.Match(rawText);
+        if (!m.Success) return false;
+
+        var token = m.Groups["n"].Value;
+        if (token.Equals("З", StringComparison.OrdinalIgnoreCase))
+        {
+            quantity = 3;
+            return true;
+        }
+        if (!int.TryParse(token, out var n) || n < 1) return false;
+        quantity = Math.Min(n, 999);
+        return true;
     }
 
     private static bool HasLongWord(string normalized, int minLen)

@@ -36,6 +36,18 @@ public class NameTranslatorTests
         Assert.NotEqual(normalizedLocalized, en); // it translated to *something* English
     }
 
+    [Fact]
+    public void Translate_LocalizedOcrSlip_UsesFuzzyFallback()
+    {
+        var t = NameTranslator.FromPairs(
+        [
+            ("Cyclonic Alloy", "Вихревой сплав"),
+            ("Expansive Alloy", "Экспансивный сплав"),
+        ]);
+
+        Assert.Equal("cyclonic alloy", t.Translate("ьихревои сплав"));
+    }
+
     // An English client reads English names directly — there must be no mapping that mangles them.
     [Theory]
     [InlineData("chaos orb")]

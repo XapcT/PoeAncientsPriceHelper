@@ -29,6 +29,9 @@ public class OcrScannerTests
 
     [Theory]
     [InlineData("14x adaptive alloy", "adaptive alloy")]
+    [InlineData("сфера алхимии", "сфера алхимии")]
+    [InlineData("сфера алхимии з", "сфера алхимии", "Сфера алхимии (З)")]
+    [InlineData("стекольная масса 2", "стекольная масса", "Стекольная масса (2)")]
     [InlineData("1 mystic alloy", "mystic alloy")]
     [InlineData("3x rune of aldur", "rune of aldur")]
     [InlineData("adaptive alloy", "adaptive alloy")]
@@ -45,9 +48,9 @@ public class OcrScannerTests
     [InlineData("6xarcanist s etcher", "arcanist s etcher")]
     [InlineData("6x arcanist s etcher", "arcanist s etcher")]
     [InlineData("14xadaptive alloy", "adaptive alloy")]
-    public void StripLeadingNoise_RemovesQuantityPrefix(string input, string expected)
+    public void StripLeadingNoise_RemovesQuantityPrefix(string input, string expected, string? rawText = null)
     {
-        Assert.Equal(expected, OcrScanner.StripLeadingNoise(input));
+        Assert.Equal(expected, OcrScanner.StripLeadingNoise(input, rawText));
     }
 
     [Theory]
@@ -69,11 +72,13 @@ public class OcrScannerTests
     [Theory]
     [InlineData("3x orb of alchemy", 3, true)]      // explicit Nx marker → Explicit
     [InlineData("1x orb of alchemy", 1, true)]      // explicit 1x is still an explicit read
+    [InlineData("сфера алхимии з", 3, true, "Сфера алхимии (З)")]
+    [InlineData("стекольная масса 2", 2, true, "Стекольная масса (2)")]
     [InlineData("orb of alchemy", 1, false)]        // no marker → assumed single, not explicit
     [InlineData("warding rune of protection i", 1, false)]
-    public void ExtractMultiplierWithConfidence_TracksExplicitMarker(string input, int expectedMultiplier, bool expectedExplicit)
+    public void ExtractMultiplierWithConfidence_TracksExplicitMarker(string input, int expectedMultiplier, bool expectedExplicit, string? rawText = null)
     {
-        var (multiplier, explicitHit) = OcrScanner.ExtractMultiplierWithConfidence(input);
+        var (multiplier, explicitHit) = OcrScanner.ExtractMultiplierWithConfidence(input, rawText);
         Assert.Equal(expectedMultiplier, multiplier);
         Assert.Equal(expectedExplicit, explicitHit);
     }

@@ -9,9 +9,10 @@ namespace PoeAncientsPriceHelper;
 // (issue #29: "Chaossphäre" never matches "chaos orb").
 //
 // Locale files are English-keyed JSON (English name → localized name); the translator inverts them
-// into normalized localized → English-key. Matching is exact → diacritic-folded: folding rescues the
-// common OCR slip of dropping/mangling an accent ("Chaossphäre" read as "chaossphare"). A name with
-// no translation is returned unchanged, so an English client (or an already-English row) is a no-op
+// into normalized localized → English-key. Matching is exact → diacritic-folded → conservative fuzzy:
+// folding rescues the common OCR slip of dropping/mangling an accent ("Chaossphäre" read as
+// "chaossphare"), while fuzzy absorbs one-off OCR slips in non-Latin locale names. A name with no
+// translation is returned unchanged, so an English client (or an already-English row) is a no-op
 // pass-through.
 //
 // Only the ONE language the user selects (Settings -> Game language) is loaded. English loads nothing,
@@ -25,6 +26,7 @@ internal sealed class NameTranslator
     // so they match PriceRepository's dictionary directly).
     private readonly Dictionary<string, string> _exact;      // normalized localized → english key
     private readonly Dictionary<string, string> _folded;     // Fold(localized)      → english key
+    private const double FuzzyThreshold = 0.84;
 
     public int EntryCount => _exact.Count;
     public bool HasEntries => _exact.Count > 0;
@@ -262,7 +264,34 @@ internal sealed class NameTranslator
         if (_exact.Count == 0 || string.IsNullOrEmpty(normalizedName)) return normalizedName;
         if (_exact.TryGetValue(normalizedName, out var en)) return en;
         if (_folded.TryGetValue(NameNormalizer.Fold(normalizedName), out en)) return en;
+        if (BestFuzzy(normalizedName) is { } fuzzy) return fuzzy;
         return normalizedName;
+    }
+
+    private string? BestFuzzy(string normalizedName)
+    {
+        if (normalizedName.Length < 6) return null;
+
+        string? best = null;
+        double bestScore = FuzzyThreshold;
+        bool ambiguous = false;
+        foreach (var (localized, english) in _exact)
+        {
+            if (Math.Abs(localized.Length - normalizedName.Length) > 3) continue;
+            int dist = ScanEngine.Levenshtein(normalizedName, localized);
+            double score = 1.0 - (double)dist / Math.Max(normalizedName.Length, localized.Length);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = english;
+                ambiguous = false;
+            }
+            else if (best is not null && Math.Abs(score - bestScore) < 0.000001 && english != best)
+            {
+                ambiguous = true;
+            }
+        }
+        return ambiguous ? null : best;
     }
 
     // Build directly from English→localized pairs (used by tests and as the merge primitive).
