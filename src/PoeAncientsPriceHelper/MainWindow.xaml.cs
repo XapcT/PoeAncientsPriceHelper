@@ -62,6 +62,7 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         NameTranslator.EnsurePersistentFallbacks(AppPaths.LogUpdate);
+        await NameTranslator.RefreshRemoteLocalesAsync(_http, AppPaths.LogUpdate);
         _config = ConfigStore.Load();
         PopulateFields();
         // When already running in debug mode the relaunch is pointless — repurpose the link to open the
@@ -329,6 +330,10 @@ public partial class MainWindow : Window
         // left running (common, since it lives in the tray during a play session) is now picked up
         // without a restart. No-ops once something is staged, and is reentrancy-guarded. (#27 follow-up)
         _ = CheckForUpdatesAsync();
+        // Locale files are tiny; re-check them on the same cadence so Russian mappings can be fixed
+        // from the fork without shipping a full installer. A running scanner keeps its current
+        // translator; the refreshed file is picked up on the next scanner/app start.
+        _ = NameTranslator.RefreshRemoteLocalesAsync(_http, AppPaths.LogUpdate);
     }
 
     // Status-label colors: normal (matches the XAML default), amber when a refresh failed but prices

@@ -1,3 +1,4 @@
+using System.Net.Http;
 using Newtonsoft.Json;
 
 namespace PoeAncientsPriceHelper;
@@ -34,16 +35,21 @@ internal sealed class NameTranslator
 
     private const string LocaleDirName = "locales";
     private const string PersistedBundledDirName = "_bundled";
+    private const string RemoteDirName = "_remote";
+    private static readonly Uri RemoteRussianLocaleUrl = new(
+        "https://raw.githubusercontent.com/XapcT/PoeAncientsPriceHelper/main/src/PoeAncientsPriceHelper/locales/ru.json");
 
     // Where locale files live:
     // 1) the bundled locales\ folder shipped next to the exe,
     // 2) the app-managed persisted fallback copied into LocalAppData (survives Velopack current\ swaps),
-    // 3) the user's LocalAppData\locales\ drop-in overrides, loaded last.
+    // 3) the latest valid locale downloaded from the fork's GitHub main branch,
+    // 4) the user's LocalAppData\locales\ drop-in overrides, loaded last.
     private static string BundledDirectory => Path.Combine(AppContext.BaseDirectory, LocaleDirName);
     private static string UserDirectory => Path.Combine(AppPaths.DataDir, LocaleDirName);
     private static string PersistedBundledDirectory => Path.Combine(UserDirectory, PersistedBundledDirName);
+    private static string RemoteDirectory => Path.Combine(UserDirectory, RemoteDirName);
     private static IEnumerable<string> DefaultDirectories =>
-        [BundledDirectory, PersistedBundledDirectory, UserDirectory];
+        [BundledDirectory, PersistedBundledDirectory, RemoteDirectory, UserDirectory];
 
     // A locale offered in the settings "Game language" dropdown.
     public sealed record LocaleInfo(string Code, string DisplayName);
@@ -61,7 +67,7 @@ internal sealed class NameTranslator
             return Empty;
 
         var pairs = new List<(string, string)>();
-        foreach (var dir in DefaultDirectories)
+        foreach (var dir in directories)
         {
             var file = Path.Combine(dir, code + ".json");
             if (!File.Exists(file)) continue;
@@ -85,6 +91,9 @@ internal sealed class NameTranslator
     // last-resort safety net for names that used to work.
     public static void EnsurePersistentFallbacks(Action<string>? log = null) =>
         EnsurePersistentFallback("ru", BundledDirectory, UserDirectory, log);
+
+    public static Task RefreshRemoteLocalesAsync(HttpClient http, Action<string>? log = null) =>
+        RefreshRemoteLocaleAsync("ru", RemoteRussianLocaleUrl, http, UserDirectory, log);
 
     internal static bool EnsurePersistentFallback(
         string code, string bundledDirectory, string userDirectory, Action<string>? log = null)
@@ -113,6 +122,49 @@ internal sealed class NameTranslator
         catch (Exception ex)
         {
             log?.Invoke($"locale fallback {code}: copy failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    internal static async Task<bool> RefreshRemoteLocaleAsync(
+        string code, Uri url, HttpClient http, string userDirectory, Action<string>? log = null)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return false;
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.TryAddWithoutValidation("User-Agent", "PoeAncientsPriceHelper-RU");
+            using var resp = await http.SendAsync(req, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                log?.Invoke($"locale remote {code}: HTTP {(int)resp.StatusCode}");
+                return false;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(cts.Token);
+            if (!IsUsableLocaleJson(json, code))
+            {
+                log?.Invoke($"locale remote {code}: downloaded file is invalid");
+                return false;
+            }
+
+            var targetDir = Path.Combine(userDirectory, RemoteDirName);
+            var target = Path.Combine(targetDir, code + ".json");
+            Directory.CreateDirectory(targetDir);
+            WriteAllTextAtomic(target, json);
+            log?.Invoke($"locale remote {code}: updated from {url}");
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            log?.Invoke($"locale remote {code}: refresh timed out");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"locale remote {code}: refresh failed: {ex.Message}");
             return false;
         }
     }
@@ -178,15 +230,28 @@ internal sealed class NameTranslator
         if (!File.Exists(path)) return false;
         try
         {
-            var locale = JsonConvert.DeserializeObject<LocaleFile>(File.ReadAllText(path));
-            if (locale?.Entries is not { Count: > 0 }) return false;
-            return string.IsNullOrWhiteSpace(locale.Code)
-                   || locale.Code.Equals(expectedCode, StringComparison.OrdinalIgnoreCase);
+            return IsUsableLocaleJson(File.ReadAllText(path), expectedCode);
         }
         catch
         {
             return false;
         }
+    }
+
+    private static bool IsUsableLocaleJson(string json, string expectedCode)
+    {
+        var locale = JsonConvert.DeserializeObject<LocaleFile>(json);
+        if (locale?.Entries is not { Count: > 0 }) return false;
+        return string.IsNullOrWhiteSpace(locale.Code)
+               || locale.Code.Equals(expectedCode, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void WriteAllTextAtomic(string path, string text)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, text);
+        if (File.Exists(path)) File.Replace(tmp, path, null);
+        else File.Move(tmp, path);
     }
 
     // Resolve an OCR'd, already-normalized name to its English price key. Returns the input unchanged

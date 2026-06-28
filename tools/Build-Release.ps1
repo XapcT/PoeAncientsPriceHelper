@@ -94,8 +94,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 @"
 ## What's new
 
-- Added a persisted Russian locale fallback outside Velopack's current folder.
-- Russian name translation now survives future installer updates even if bundled locale files are removed or broken.
+- Russian localization now refreshes ru.json directly from the fork's GitHub main branch.
+- Fresh remote locale files are stored in LocalAppData and loaded before user overrides.
 - Auto-updates continue to use XapcT/PoeAncientsPriceHelper GitHub Releases.
 
 ## Install

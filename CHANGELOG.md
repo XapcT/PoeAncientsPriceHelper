@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.5.3] — 2026-06-28
+
+### Added
+
+- Russian localization refresh now downloads the latest valid `ru.json` from the fork's `main` branch into `%LocalAppData%\PoeAncientsPriceHelper\locales\_remote`.
+- The locale load order is now bundled locale, persisted fallback, remote GitHub locale, then user override.
+
 ## [3.5.2] — 2026-06-28
 
 ### Fixed

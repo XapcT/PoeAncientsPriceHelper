@@ -12,6 +12,7 @@
 - Использует Windows OCR и Windows Graphics Capture, без Tesseract и внешних OCR-моделей.
 - Хранит калибровку и настройки в `%LocalAppData%\PoeAncientsPriceHelper`, поэтому обновления их не стирают.
 - Хранит app-managed fallback русской локализации в `%LocalAppData%\PoeAncientsPriceHelper\locales\_bundled`, чтобы автообновление не ломало уже рабочие русские названия.
+- Подтягивает свежий `ru.json` из `main` этого fork-репозитория в `%LocalAppData%\PoeAncientsPriceHelper\locales\_remote`, так что правки локализации можно выпускать без нового установщика.
 - Ставит и обновляет приложение через GitHub Releases этого fork-репозитория.
 
 ## Установка

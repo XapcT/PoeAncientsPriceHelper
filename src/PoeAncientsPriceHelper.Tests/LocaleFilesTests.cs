@@ -109,6 +109,100 @@ public class LocaleFilesTests
         Assert.DoesNotContain("Сфера хаоса", File.ReadAllText(fallback));
     }
 
+    [Fact]
+    public void ForLanguage_UsesProvidedDirectories()
+    {
+        using var dir = new TempDir();
+        File.WriteAllText(Path.Combine(dir.Path, "ru.json"), """
+        {
+          "language": "Русский (Russian)",
+          "code": "ru",
+          "entries": {
+            "Chaos Orb": "Тестовая сфера"
+          }
+        }
+        """);
+
+        Assert.Equal("chaos orb", NameTranslator.ForLanguage("ru", [dir.Path]).Translate("тестовая сфера"));
+    }
+
+    [Fact]
+    public async Task RemoteLocale_IsDownloadedAndLoaded()
+    {
+        using var dir = new TempDir();
+        using var http = new HttpClient(new FakeHttpMessageHandler("""
+        {
+          "language": "Русский (Russian)",
+          "code": "ru",
+          "entries": {
+            "Chaos Orb": "Удаленная сфера"
+          }
+        }
+        """));
+
+        Assert.True(await NameTranslator.RefreshRemoteLocaleAsync(
+            "ru", new Uri("https://example.invalid/ru.json"), http, dir.Path));
+
+        var remoteDir = Path.Combine(dir.Path, "_remote");
+        Assert.True(File.Exists(Path.Combine(remoteDir, "ru.json")));
+        Assert.Equal("chaos orb", NameTranslator.ForLanguage("ru", [remoteDir]).Translate("удаленная сфера"));
+    }
+
+    [Fact]
+    public async Task RemoteLocale_InvalidDownload_DoesNotOverwriteExistingFile()
+    {
+        using var dir = new TempDir();
+        var remoteDir = Path.Combine(dir.Path, "_remote");
+        Directory.CreateDirectory(remoteDir);
+        var remoteFile = Path.Combine(remoteDir, "ru.json");
+        File.WriteAllText(remoteFile, """
+        {
+          "language": "Русский (Russian)",
+          "code": "ru",
+          "entries": {
+            "Chaos Orb": "Рабочая сфера"
+          }
+        }
+        """);
+        using var http = new HttpClient(new FakeHttpMessageHandler("""{ "code": "ru", "entries": {} }"""));
+
+        Assert.False(await NameTranslator.RefreshRemoteLocaleAsync(
+            "ru", new Uri("https://example.invalid/ru.json"), http, dir.Path));
+
+        Assert.Contains("Рабочая сфера", File.ReadAllText(remoteFile));
+        Assert.Equal("chaos orb", NameTranslator.ForLanguage("ru", [remoteDir]).Translate("рабочая сфера"));
+    }
+
+    [Fact]
+    public void UserLocale_OverridesRemoteLocale()
+    {
+        using var dir = new TempDir();
+        var userDir = Path.Combine(dir.Path, "locales");
+        var remoteDir = Path.Combine(userDir, "_remote");
+        Directory.CreateDirectory(userDir);
+        Directory.CreateDirectory(remoteDir);
+        File.WriteAllText(Path.Combine(remoteDir, "ru.json"), """
+        {
+          "language": "Русский (Russian)",
+          "code": "ru",
+          "entries": {
+            "Wrong Item": "Общее имя"
+          }
+        }
+        """);
+        File.WriteAllText(Path.Combine(userDir, "ru.json"), """
+        {
+          "language": "Русский (Russian)",
+          "code": "ru",
+          "entries": {
+            "Chaos Orb": "Общее имя"
+          }
+        }
+        """);
+
+        Assert.Equal("chaos orb", NameTranslator.ForLanguage("ru", [remoteDir, userDir]).Translate("общее имя"));
+    }
+
     // The settings dropdown is populated from the files actually present — de/fr/pt/ru/sp, never "en".
     [Fact]
     public void AvailableLocales_ListsTheSeededLanguages()
